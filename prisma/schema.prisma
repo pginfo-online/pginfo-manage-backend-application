@@ -1,0 +1,759 @@
+// ──────────────────────────────────────────────────────────────
+// PgInfo — Prisma Schema
+// ──────────────────────────────────────────────────────────────
+// This is the single source of truth for the database schema.
+// All changes go through prisma migrate dev.
+// ──────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Identity & Authentication
+// ════════════════════════════════════════════════════════════════
+
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  email          String   @unique
+  mobile         String?  @unique
+  passwordHash   String   @map("password_hash")
+  firstName      String   @map("first_name")
+  lastName       String?  @map("last_name")
+  emailVerified  Boolean  @default(false) @map("email_verified")
+  mobileVerified Boolean  @default(false) @map("mobile_verified")
+  isActive       Boolean  @default(true) @map("is_active")
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  memberships     OrganizationMember[]
+  refreshTokens   RefreshToken[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  family      String    @db.Uuid // Token family for rotation & reuse detection
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
+  replacedBy  String?   @map("replaced_by") @db.Uuid // Points to the successor token
+  userAgent   String?   @map("user_agent")
+  ipAddress   String?   @map("ip_address") @db.Inet
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Organizations & Membership
+// ════════════════════════════════════════════════════════════════
+
+model Organization {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  members    OrganizationMember[]
+  properties Property[]
+  auditLogs  AuditLog[]
+
+  @@map("organizations")
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  MANAGER
+  STAFF
+  VIEWER
+
+  @@map("org_role")
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  role           OrgRole      @default(VIEWER)
+  isActive       Boolean      @default(true) @map("is_active")
+  joinedAt       DateTime     @default(now()) @map("joined_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // One membership per user per org
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_members")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Property Management
+// ════════════════════════════════════════════════════════════════
+
+enum PropertyType {
+  PG
+  HOSTEL
+  CO_LIVING
+  FLAT
+  APARTMENT
+  RK
+  OTHER
+
+  @@map("property_type")
+}
+
+enum PropertyStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+  UNDER_MAINTENANCE
+
+  @@map("property_status")
+}
+
+model Property {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  name           String
+  type           PropertyType
+  status         PropertyStatus @default(ACTIVE)
+
+  // Address
+  addressLine1   String         @map("address_line1")
+  addressLine2   String?        @map("address_line2")
+  city           String
+  state          String
+  pincode        String         @db.VarChar(6)
+  country        String         @default("IN") @db.VarChar(2)
+
+  // Contact
+  contactPhone   String?        @map("contact_phone")
+  contactEmail   String?        @map("contact_email")
+
+  // Configuration
+  timezone       String         @default("Asia/Kolkata")
+  rentDueDay     Int            @default(1) @map("rent_due_day")  // Day of month rent is due (1-28)
+
+  // Metadata
+  description    String?
+  amenities      String[]       @default([])
+  totalFloors    Int?           @map("total_floors")
+
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rooms        Room[]
+  residents    Resident[]
+  staff        Staff[]
+  expenses     Expense[]
+  complaints   Complaint[]
+  announcements Announcement[]
+
+  @@index([organizationId])
+  @@unique([organizationId, name]) // Property names unique within org
+  @@map("properties")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Room & Bed Management
+// ════════════════════════════════════════════════════════════════
+
+enum RoomStatus {
+  AVAILABLE
+  OCCUPIED
+  PARTIALLY_OCCUPIED
+  UNDER_MAINTENANCE
+  ARCHIVED
+
+  @@map("room_status")
+}
+
+enum SharingType {
+  SINGLE
+  DOUBLE
+  TRIPLE
+  FOUR_SHARING
+  FIVE_SHARING
+  SIX_SHARING
+  SEVEN_SHARING
+  EIGHT_SHARING
+  NINE_SHARING
+
+  @@map("sharing_type")
+}
+
+model Room {
+  id             String      @id @default(uuid()) @db.Uuid
+  propertyId     String      @map("property_id") @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  roomNumber     String      @map("room_number")
+  floor          String      @default("0") // Flexible: "Ground", "1", "Basement", etc.
+  sharingType    SharingType @map("sharing_type")
+  rentAmount     Int         @map("rent_amount") // In paise per bed/unit
+  status         RoomStatus  @default(AVAILABLE)
+  amenities      String[]    @default([])
+  description    String?
+  availableFrom  DateTime?   @map("available_from") @db.Timestamptz
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property     Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  beds         Bed[]
+  residents    Resident[]
+  complaints   Complaint[]
+
+  @@unique([propertyId, roomNumber]) // Room numbers unique within property
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("rooms")
+}
+
+enum BedStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  UNDER_MAINTENANCE
+  ARCHIVED
+
+  @@map("bed_status")
+}
+
+model Bed {
+  id             String    @id @default(uuid()) @db.Uuid
+  roomId         String    @map("room_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  bedNumber      String    @map("bed_number")
+  status         BedStatus @default(AVAILABLE)
+  rentAmount     Int?      @map("rent_amount") // Override room rent in paise; null = use room rent
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  residents Resident[]
+
+  @@unique([roomId, bedNumber]) // Bed numbers unique within room
+  @@index([organizationId])
+  @@map("beds")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Resident & Occupancy Management
+// ════════════════════════════════════════════════════════════════
+
+enum ResidentStatus {
+  PENDING_MOVE_IN
+  ACTIVE
+  NOTICE_PERIOD
+  MOVED_OUT
+  ARCHIVED
+
+  @@map("resident_status")
+}
+
+enum Profession {
+  STUDENT
+  WORKING_PROFESSIONAL
+  SELF_EMPLOYED
+  OTHER
+
+  @@map("profession")
+}
+
+model Resident {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @map("organization_id") @db.Uuid
+  propertyId      String         @map("property_id") @db.Uuid
+  roomId          String?        @map("room_id") @db.Uuid
+  bedId           String?        @map("bed_id") @db.Uuid
+
+  // Personal info
+  firstName       String         @map("first_name")
+  lastName        String?        @map("last_name")
+  email           String?
+  mobile          String
+  whatsappNumber  String?        @map("whatsapp_number")
+  emergencyContact String?       @map("emergency_contact")
+  profession      Profession     @default(OTHER)
+
+  // Tenancy
+  status          ResidentStatus @default(PENDING_MOVE_IN)
+  monthlyRent     Int            @map("monthly_rent") // paise
+  securityDeposit Int            @default(0) @map("security_deposit") // paise
+  joiningDate     DateTime       @map("joining_date") @db.Date
+  moveInDate      DateTime?      @map("move_in_date") @db.Date
+  moveOutDate     DateTime?      @map("move_out_date") @db.Date
+  expectedVacatingDate DateTime? @map("expected_vacating_date") @db.Date
+  lockInEndDate   DateTime?      @map("lock_in_end_date") @db.Date
+  rentDueDay      Int?           @map("rent_due_day") // Override property default
+
+  // Metadata
+  notes           String?
+  version         Int            @default(1) // Optimistic concurrency
+
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property    Property    @relation(fields: [propertyId], references: [id])
+  room        Room?       @relation(fields: [roomId], references: [id])
+  bed         Bed?        @relation(fields: [bedId], references: [id])
+  billingRecords BillingRecord[]
+  payments    Payment[]
+  occupancyHistory OccupancyRecord[]
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([status])
+  // Enforce: one active resident per bed
+  // NOTE: Partial unique index must be added via raw SQL migration
+  // @@unique([bedId]) WHERE status IN ('ACTIVE', 'NOTICE_PERIOD')
+  @@map("residents")
+}
+
+model OccupancyRecord {
+  id             String    @id @default(uuid()) @db.Uuid
+  residentId     String    @map("resident_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  propertyId     String    @map("property_id") @db.Uuid
+  roomId         String    @map("room_id") @db.Uuid
+  bedId          String?   @map("bed_id") @db.Uuid
+  monthlyRent    Int       @map("monthly_rent") // paise — rent at time of this allocation
+  startDate      DateTime  @map("start_date") @db.Date
+  endDate        DateTime? @map("end_date") @db.Date
+  reason         String?   // "initial", "room_change", "bed_swap", "move_out"
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  resident Resident @relation(fields: [residentId], references: [id])
+
+  @@index([organizationId])
+  @@index([residentId])
+  @@map("occupancy_records")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Finance, Billing & Payments
+// ════════════════════════════════════════════════════════════════
+
+enum BillingStatus {
+  ISSUED
+  DUE
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+  WAIVED
+
+  @@map("billing_status")
+}
+
+enum BillingType {
+  RENT
+  SECURITY_DEPOSIT
+  ELECTRICITY
+  WATER
+  MAINTENANCE
+  LATE_FEE
+  OTHER
+
+  @@map("billing_type")
+}
+
+model BillingRecord {
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  residentId      String        @map("resident_id") @db.Uuid
+  propertyId      String        @map("property_id") @db.Uuid
+
+  type            BillingType
+  status          BillingStatus @default(ISSUED)
+  description     String?
+
+  // Amounts in paise
+  amount          Int           // Total billed amount
+  paidAmount      Int           @default(0) @map("paid_amount")
+  lateFeeAmount   Int           @default(0) @map("late_fee_amount")
+
+  // Billing period
+  billingMonth    Int?          @map("billing_month") // 1-12
+  billingYear     Int?          @map("billing_year")
+  dueDate         DateTime      @map("due_date") @db.Date
+  periodStart     DateTime?     @map("period_start") @db.Date
+  periodEnd       DateTime?     @map("period_end") @db.Date
+
+  // Idempotency: prevent duplicate billing for same resident+type+period
+  idempotencyKey  String?       @unique @map("idempotency_key")
+
+  version         Int           @default(1) // Optimistic concurrency
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  resident  Resident  @relation(fields: [residentId], references: [id])
+  payments  Payment[]
+
+  @@index([organizationId])
+  @@index([residentId])
+  @@index([status])
+  @@index([dueDate])
+  // Prevent duplicate rent billing for same resident and month
+  @@unique([residentId, type, billingMonth, billingYear])
+  @@map("billing_records")
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+  REFUNDED
+  DISPUTED
+
+  @@map("payment_status")
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CHEQUE
+  RAZORPAY
+  OTHER
+
+  @@map("payment_mode")
+}
+
+model Payment {
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  residentId      String        @map("resident_id") @db.Uuid
+  billingRecordId String?       @map("billing_record_id") @db.Uuid
+
+  amount          Int           // paise
+  status          PaymentStatus @default(PENDING)
+  mode            PaymentMode
+  collectionDate  DateTime      @map("collection_date") @db.Date
+  reference       String?       // UPI ref, cheque number, etc.
+  notes           String?
+  proofUrl        String?       @map("proof_url")
+
+  // Razorpay-specific
+  razorpayOrderId   String?     @unique @map("razorpay_order_id")
+  razorpayPaymentId String?     @unique @map("razorpay_payment_id")
+  razorpaySignature String?     @map("razorpay_signature")
+
+  // Audit
+  recordedBy      String?       @map("recorded_by") @db.Uuid // User who recorded offline payment
+  idempotencyKey  String?       @unique @map("idempotency_key")
+
+  version         Int           @default(1)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  resident      Resident       @relation(fields: [residentId], references: [id])
+  billingRecord BillingRecord? @relation(fields: [billingRecordId], references: [id])
+
+  @@index([organizationId])
+  @@index([residentId])
+  @@index([status])
+  @@map("payments")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Expense Management
+// ════════════════════════════════════════════════════════════════
+
+model ExpenseCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  isSystem       Boolean  @default(false) @map("is_system") // System-seeded categories
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  expenses Expense[]
+
+  @@unique([organizationId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  propertyId     String   @map("property_id") @db.Uuid
+  categoryId     String   @map("category_id") @db.Uuid
+
+  amount         Int      // paise
+  expenseDate    DateTime @map("expense_date") @db.Date
+  paymentMode    PaymentMode @map("payment_mode")
+  paidBy         String?  @map("paid_by")
+  paidTo         String?  @map("paid_to")
+  description    String?
+  receiptUrl     String?  @map("receipt_url")
+  notes          String?
+
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property Property        @relation(fields: [propertyId], references: [id])
+  category ExpenseCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Complaints & Maintenance
+// ════════════════════════════════════════════════════════════════
+
+enum ComplaintStatus {
+  RECEIVED
+  VERIFIED
+  NEED_MORE_TIME
+  TEAM_WORKING
+  PENDING
+  RESOLVED
+
+  @@map("complaint_status")
+}
+
+enum ComplaintUrgency {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("complaint_urgency")
+}
+
+model ComplaintCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  isSystem       Boolean  @default(false) @map("is_system")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  complaints Complaint[]
+
+  @@unique([organizationId, name])
+  @@map("complaint_categories")
+}
+
+model Complaint {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  propertyId     String           @map("property_id") @db.Uuid
+  categoryId     String           @map("category_id") @db.Uuid
+  roomId         String?          @map("room_id") @db.Uuid
+
+  description    String
+  location       String?          // For common area complaints
+  urgency        ComplaintUrgency @default(MEDIUM)
+  status         ComplaintStatus  @default(RECEIVED)
+
+  assignedTo     String?          @map("assigned_to") @db.Uuid // Staff member
+  resolution     String?
+  resolvedAt     DateTime?        @map("resolved_at") @db.Timestamptz
+
+  createdBy      String           @map("created_by") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property Property          @relation(fields: [propertyId], references: [id])
+  category ComplaintCategory @relation(fields: [categoryId], references: [id])
+  room     Room?             @relation(fields: [roomId], references: [id])
+  comments ComplaintComment[]
+  history  ComplaintHistory[]
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("complaints")
+}
+
+model ComplaintComment {
+  id          String   @id @default(uuid()) @db.Uuid
+  complaintId String   @map("complaint_id") @db.Uuid
+  authorId    String   @map("author_id") @db.Uuid
+  content     String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  complaint Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+
+  @@index([complaintId])
+  @@map("complaint_comments")
+}
+
+model ComplaintHistory {
+  id            String          @id @default(uuid()) @db.Uuid
+  complaintId   String          @map("complaint_id") @db.Uuid
+  fromStatus    ComplaintStatus @map("from_status")
+  toStatus      ComplaintStatus @map("to_status")
+  changedBy     String          @map("changed_by") @db.Uuid
+  notes         String?
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  complaint Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+
+  @@index([complaintId])
+  @@map("complaint_history")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Staff Management
+// ════════════════════════════════════════════════════════════════
+
+enum StaffStatus {
+  ACTIVE
+  INACTIVE
+  TERMINATED
+
+  @@map("staff_status")
+}
+
+model StaffDesignation {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  isSystem       Boolean  @default(false) @map("is_system")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  staff Staff[]
+
+  @@unique([organizationId, name])
+  @@map("staff_designations")
+}
+
+model Staff {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  propertyId     String      @map("property_id") @db.Uuid
+  designationId  String      @map("designation_id") @db.Uuid
+
+  firstName      String      @map("first_name")
+  lastName       String?     @map("last_name")
+  mobile         String
+  email          String?
+  status         StaffStatus @default(ACTIVE)
+
+  salary         Int?        // paise — monthly salary; null if not applicable
+  joiningDate    DateTime?   @map("joining_date") @db.Date
+  exitDate       DateTime?   @map("exit_date") @db.Date
+  notes          String?
+
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property    Property         @relation(fields: [propertyId], references: [id])
+  designation StaffDesignation @relation(fields: [designationId], references: [id])
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@map("staff")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Announcements & Communications
+// ════════════════════════════════════════════════════════════════
+
+enum AnnouncementStatus {
+  DRAFT
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+
+  @@map("announcement_status")
+}
+
+enum AnnouncementScope {
+  ORGANIZATION
+  PROPERTY
+
+  @@map("announcement_scope")
+}
+
+model Announcement {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @map("organization_id") @db.Uuid
+  propertyId     String?            @map("property_id") @db.Uuid
+  scope          AnnouncementScope
+  title          String
+  body           String
+  status         AnnouncementStatus @default(DRAFT)
+  scheduledAt    DateTime?          @map("scheduled_at") @db.Timestamptz
+  sentAt         DateTime?          @map("sent_at") @db.Timestamptz
+  createdBy      String             @map("created_by") @db.Uuid
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  property Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([organizationId])
+  @@map("announcements")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Audit Log
+// ════════════════════════════════════════════════════════════════
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String   // e.g. "user.login", "resident.create", "payment.record"
+  entityType     String?  @map("entity_type")
+  entityId       String?  @map("entity_id")
+  metadata       Json?    // Additional context — never sensitive data
+  ipAddress      String?  @map("ip_address") @db.Inet
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations (optional, for querying)
+  organization Organization? @relation(fields: [organizationId], references: [id])
+  user         User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

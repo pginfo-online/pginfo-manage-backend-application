@@ -1,0 +1,42 @@
+import { Controller, Get } from '@nestjs/common';
+import {
+  HealthCheck,
+  HealthCheckService,
+  PrismaHealthIndicator,
+  type HealthCheckResult,
+} from '@nestjs/terminus';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { PrismaService } from '../database/index.js';
+
+@ApiTags('Health')
+@Controller('health')
+export class HealthController {
+  constructor(
+    private readonly health: HealthCheckService,
+    private readonly prismaHealth: PrismaHealthIndicator,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * Liveness probe — is the process running?
+   * Used by container orchestrators (Docker, K8s) to restart crashed instances.
+   */
+  @Get('live')
+  @ApiOperation({ summary: 'Liveness check' })
+  liveness(): { status: string } {
+    return { status: 'ok' };
+  }
+
+  /**
+   * Readiness probe — can this instance serve traffic?
+   * Checks database connectivity and other critical dependencies.
+   */
+  @Get('ready')
+  @HealthCheck()
+  @ApiOperation({ summary: 'Readiness check' })
+  readiness(): Promise<HealthCheckResult> {
+    return this.health.check([
+      () => this.prismaHealth.pingCheck('database', this.prisma),
+    ]);
+  }
+}
