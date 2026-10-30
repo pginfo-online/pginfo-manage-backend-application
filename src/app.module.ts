@@ -23,6 +23,11 @@ import { MaintenanceModule } from './modules/maintenance/maintenance.module.js';
 import { StaffModule } from './modules/staff/staff.module.js';
 import { CommunicationsModule } from './modules/communications/communications.module.js';
 import { ReportingModule } from './modules/reporting/reporting.module.js';
+import { LeadsModule } from './modules/leads/leads.module.js';
+import { BookingsModule } from './modules/bookings/bookings.module.js';
+import { MetersModule } from './modules/meters/meters.module.js';
+import { TemplatesModule } from './modules/templates/templates.module.js';
+import { ReviewsModule } from './modules/reviews/reviews.module.js';
 
 // Config
 import { validate } from './config/index.js';
@@ -72,6 +77,11 @@ import { validate } from './config/index.js';
     StaffModule,
     CommunicationsModule,
     ReportingModule,
+    LeadsModule,
+    BookingsModule,
+    MetersModule,
+    TemplatesModule,
+    ReviewsModule,
   ],
 })
 export class AppModule {}

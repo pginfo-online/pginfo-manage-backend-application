@@ -173,6 +173,10 @@ model Property {
   expenses     Expense[]
   complaints   Complaint[]
   announcements Announcement[]
+  leads        Lead[]
+  bookings     Booking[]
+  subMeters    SubMeter[]
+  agreementTemplates AgreementTemplate[]
 
   @@index([organizationId])
   @@unique([organizationId, name]) // Property names unique within org
@@ -258,6 +262,7 @@ model Bed {
   // Relations
   room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
   residents Resident[]
+  bookings  Booking[]
 
   @@unique([roomId, bedNumber]) // Bed numbers unique within room
   @@index([organizationId])
@@ -756,4 +761,148 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ════════════════════════════════════════════════════════════════
+// CRM & Leads Management
+// ════════════════════════════════════════════════════════════════
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  VISITED
+  TOKEN_PAID
+  CONVERTED
+  LOST
+
+  @@map("lead_status")
+}
+
+model Lead {
+  id                String     @id @default(uuid()) @db.Uuid
+  organizationId    String     @map("organization_id") @db.Uuid
+  propertyId        String     @map("property_id") @db.Uuid
+  name              String
+  mobile            String
+  email             String?
+  budget            Int?       // paise
+  sharingPreference String?    @map("sharing_preference")
+  status            LeadStatus @default(NEW)
+  source            String?    // "website", "referral", "walk_in", "listing"
+  notes             String?
+  visitScheduledAt  DateTime?  @map("visit_scheduled_at") @db.Timestamptz
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("leads")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Bookings & Reservations
+// ════════════════════════════════════════════════════════════════
+
+enum BookingStatus {
+  CONFIRMED
+  CHECKED_IN
+  CANCELLED
+  EXPIRED
+
+  @@map("booking_status")
+}
+
+model Booking {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  propertyId     String        @map("property_id") @db.Uuid
+  roomId         String?       @map("room_id") @db.Uuid
+  bedId          String?       @map("bed_id") @db.Uuid
+  guestName      String        @map("guest_name")
+  guestMobile    String        @map("guest_mobile")
+  guestEmail     String?       @map("guest_email")
+  tokenAmount    Int           @default(0) @map("token_amount") // paise
+  expectedMoveIn DateTime      @map("expected_move_in") @db.Date
+  expiryDate     DateTime?     @map("expiry_date") @db.Date
+  status         BookingStatus @default(CONFIRMED)
+  notes          String?
+  paymentMode    PaymentMode   @default(UPI) @map("payment_mode")
+  paymentRef     String?       @map("payment_ref")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  bed      Bed?     @relation(fields: [bedId], references: [id])
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("bookings")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Electric Sub-Meters
+// ════════════════════════════════════════════════════════════════
+
+model SubMeter {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  propertyId     String   @map("property_id") @db.Uuid
+  roomId         String?  @map("room_id") @db.Uuid
+  meterNumber    String   @map("meter_number")
+  tariffRate     Int      @default(1000) @map("tariff_rate") // paise per kWh (e.g. ₹10.00/kWh = 1000 paise)
+  initialReading Decimal  @default(0) @map("initial_reading") @db.Decimal(10, 2)
+  currentReading Decimal  @default(0) @map("current_reading") @db.Decimal(10, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  property Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  readings MeterReading[]
+
+  @@unique([propertyId, meterNumber])
+  @@index([organizationId])
+  @@map("sub_meters")
+}
+
+model MeterReading {
+  id            String   @id @default(uuid()) @db.Uuid
+  subMeterId    String   @map("sub_meter_id") @db.Uuid
+  readingDate   DateTime @map("reading_date") @db.Date
+  reading       Decimal  @db.Decimal(10, 2)
+  unitsConsumed Decimal  @map("units_consumed") @db.Decimal(10, 2)
+  totalAmount   Int      @map("total_amount") // paise
+  recordedBy    String?  @map("recorded_by") @db.Uuid
+  photoUrl      String?  @map("photo_url")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  subMeter SubMeter @relation(fields: [subMeterId], references: [id], onDelete: Cascade)
+
+  @@index([subMeterId])
+  @@index([readingDate])
+  @@map("meter_readings")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Rental Agreement Templates
+// ════════════════════════════════════════════════════════════════
+
+model AgreementTemplate {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  propertyId     String?  @map("property_id") @db.Uuid
+  name           String
+  content        String   @db.Text
+  isDefault      Boolean  @default(false) @map("is_default")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  property Property? @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("agreement_templates")
 }
