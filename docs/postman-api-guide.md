@@ -70,13 +70,12 @@ For authenticated requests, use Postman's **Authorization → Bearer Token** and
 ## 4. Recommended test order
 
 1. Call `GET {{baseUrl}}/health/live` to check that the API process responds.
-2. Register a test user with `POST /auth/register`, or sign in with `POST /auth/login`.
-3. Save `tokens.accessToken` and `tokens.refreshToken` from the response into the environment. The initial token has no organization selected.
-4. Create an organization with `POST /organizations`. The creator becomes its `OWNER`. Save the returned organization `id`.
-5. Call `POST /organizations/{{organizationId}}/switch` using the current bearer token. Save the returned access token; it carries the selected organization context.
-6. Use that new access token for organization-scoped endpoints. Create a property, room, bed, and resident before trying endpoints that depend on those records.
-7. Test billing and payment operations with the created resident. Add any custom categories or designations only if needed; organizations are created with system defaults.
-8. Use IDs returned by successful responses for later path and body parameters. UUID fields must be valid UUIDs belonging to the active organization.
+2. Register a test user with `POST /auth/register`, or sign in with `POST /auth/login`. Registration accepts an optional `organizationName`; it creates the organization, assigns the user as `OWNER`, seeds default categories and designations, and returns an organization-scoped access token in the same operation.
+3. Save `tokens.accessToken` and `tokens.refreshToken` from the response into the environment. For a newly registered user, save `user.activeOrganizationId` as `organizationId`; the access token already carries this organization context.
+4. For an existing user who has no organization, create one with `POST /organizations`. The creator becomes its `OWNER`. Save the returned organization `id`, then call `POST /organizations/{{organizationId}}/switch` and save the returned access token.
+5. Use the organization-scoped access token for organization endpoints. Create a property, room, bed, and resident before trying endpoints that depend on those records.
+6. Test billing and payment operations with the created resident. Add any custom categories or designations only if needed; organizations are created with system defaults.
+7. Use IDs returned by successful responses for later path and body parameters. UUID fields must be valid UUIDs belonging to the active organization.
 
 ## 5. Conventions and test notes
 

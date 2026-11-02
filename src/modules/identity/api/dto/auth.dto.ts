@@ -9,8 +9,18 @@ export const registerSchema = z.object({
     .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
     .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number'),
-  firstName: z.string().min(1, 'First name is required').trim(),
-  lastName: z.string().trim().optional(),
+  firstName: z
+    .string()
+    .trim()
+    .min(1, 'First name is required')
+    .max(100, 'First name is too long'),
+  lastName: z.string().trim().max(100, 'Last name is too long').optional(),
+  organizationName: z
+    .string()
+    .trim()
+    .min(2, 'Organization name must be at least 2 characters')
+    .max(100, 'Organization name is too long')
+    .optional(),
   mobile: z
     .string()
     .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number')

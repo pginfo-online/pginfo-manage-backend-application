@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma, type Organization, type User } from '@prisma/client';
 import { PrismaService } from '../../../platform/database/index.js';
 import { PasswordHasher } from '../domain/password-hasher.js';
 import { TokenService, type TokenPair } from './token.service.js';
@@ -8,6 +9,10 @@ import {
   NotFoundError,
 } from '../../../common/errors/index.js';
 import type { RegisterDto, LoginDto } from '../api/dto/auth.dto.js';
+import {
+  createOrganizationWithOwner,
+  generateOrganizationSlug,
+} from '../../organizations/application/organization-bootstrap.js';
 
 export interface AuthResult {
   tokens: TokenPair;
@@ -59,27 +64,79 @@ export class AuthService {
 
     const passwordHash = await PasswordHasher.hash(dto.password);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        passwordHash,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        mobile: dto.mobile,
-      },
-    });
+    const organizationName =
+      dto.organizationName ?? `${dto.firstName}'s Properties`;
+    let registration: { user: User; organization: Organization };
+    try {
+      registration = await this.prisma.$transaction(
+        async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              email: dto.email,
+              passwordHash,
+              firstName: dto.firstName,
+              lastName: dto.lastName,
+              mobile: dto.mobile,
+            },
+          });
 
-    // Audit log
-    await this.prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: 'user.registered',
-        entityType: 'User',
-        entityId: user.id,
-        ipAddress: meta?.ipAddress,
-        userAgent: meta?.userAgent,
-      },
-    });
+          const baseSlug = generateOrganizationSlug(organizationName);
+          const slug = `${baseSlug.slice(0, 36)}-${user.id.slice(0, 8)}`;
+          const organization = await createOrganizationWithOwner(tx, {
+            userId: user.id,
+            name: organizationName,
+            slug,
+          });
+
+          await tx.auditLog.create({
+            data: {
+              userId: user.id,
+              action: 'user.registered',
+              entityType: 'User',
+              entityId: user.id,
+              ipAddress: meta?.ipAddress,
+              userAgent: meta?.userAgent,
+            },
+          });
+
+          return { user, organization };
+        },
+        { timeout: 30000, maxWait: 15000 },
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = error.meta?.target;
+        const fields = Array.isArray(target)
+          ? target
+          : typeof target === 'string'
+            ? [target]
+            : [];
+        if (
+          fields.some(
+            (field) => typeof field === 'string' && field.includes('email'),
+          )
+        ) {
+          throw new ConflictError(
+            'A user with this email address already exists',
+          );
+        }
+        if (
+          fields.some(
+            (field) => typeof field === 'string' && field.includes('mobile'),
+          )
+        ) {
+          throw new ConflictError(
+            'A user with this mobile number already exists',
+          );
+        }
+      }
+      throw error;
+    }
+
+    const { user, organization } = registration;
 
     const refreshToken = await this.tokenService.generateRefreshToken(
       user.id,
@@ -91,8 +148,8 @@ export class AuthService {
     const accessToken = await this.tokenService.generateAccessToken({
       id: user.id,
       email: user.email,
-      orgId: null,
-      orgRole: null,
+      orgId: organization.id,
+      orgRole: 'OWNER',
     });
 
     return {
@@ -107,8 +164,8 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         mobile: user.mobile,
-        activeOrganizationId: null,
-        activeOrganizationRole: null,
+        activeOrganizationId: organization.id,
+        activeOrganizationRole: 'OWNER',
       },
     };
   }

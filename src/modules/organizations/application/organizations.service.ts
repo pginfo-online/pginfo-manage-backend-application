@@ -12,46 +12,10 @@ import type {
   UpdateMemberRoleDto,
 } from '../api/dto/organization.dto.js';
 import type { OrgRole } from '@prisma/client';
-
-const SYSTEM_EXPENSE_CATEGORIES = [
-  'Groceries',
-  'EMI',
-  'Salaries',
-  'Electrical Services',
-  'Plumbing',
-  'Cleaning Supplies',
-  'Internet & WiFi',
-  'Water',
-  'Electricity Bill',
-  'Gas',
-  'Repairs & Maintenance',
-  'Security',
-  'Miscellaneous',
-];
-
-const SYSTEM_COMPLAINT_CATEGORIES = [
-  'Agreements',
-  'Application Issues',
-  'Amenities',
-  'Electrical Appliances',
-  'Food',
-  'Housekeeping',
-  'Payments',
-  'Staff',
-  'Plumbing',
-  'Internet & WiFi',
-  'Other',
-];
-
-const SYSTEM_STAFF_DESIGNATIONS = [
-  'Cook',
-  'Cleaner',
-  'Plumber',
-  'Guard',
-  'Manager',
-  'Electrician',
-  'Warden',
-];
+import {
+  createOrganizationWithOwner,
+  generateOrganizationSlug,
+} from './organization-bootstrap.js';
 
 @Injectable()
 export class OrganizationsService {
@@ -66,12 +30,7 @@ export class OrganizationsService {
    * Generates a unique slug from organization name.
    */
   private generateSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .substring(0, 45);
+    return generateOrganizationSlug(name);
   }
 
   /**
@@ -94,69 +53,21 @@ export class OrganizationsService {
 
     return this.prisma.$transaction(
       async (tx) => {
-        const org = await tx.organization.create({
-          data: {
-            name: dto.name,
-            slug,
-          },
-        });
-
-        // Bind creator as OWNER
-        await tx.organizationMember.create({
-          data: {
-            userId,
-            organizationId: org.id,
-            role: "OWNER",
-          },
-        });
-
-        // Seed system expense categories for this org
-        await tx.expenseCategory.createMany({
-          data: SYSTEM_EXPENSE_CATEGORIES.map((name) => ({
-            organizationId: org.id,
-            name,
-            isSystem: true,
-          })),
-        });
-
-        // Seed system complaint categories for this org
-        await tx.complaintCategory.createMany({
-          data: SYSTEM_COMPLAINT_CATEGORIES.map((name) => ({
-            organizationId: org.id,
-            name,
-            isSystem: true,
-          })),
-        });
-
-        // Seed system staff designations for this org
-        await tx.staffDesignation.createMany({
-          data: SYSTEM_STAFF_DESIGNATIONS.map((name) => ({
-            organizationId: org.id,
-            name,
-            isSystem: true,
-          })),
-        });
-
-        // Audit log
-        await tx.auditLog.create({
-          data: {
-            organizationId: org.id,
-            userId,
-            action: "organization.create",
-            entityType: "Organization",
-            entityId: org.id,
-          },
+        const org = await createOrganizationWithOwner(tx, {
+          userId,
+          name: dto.name,
+          slug,
         });
 
         this.logger.log(
-          `Created organization ${org.name} (${org.id}) by user ${userId}`
+          `Created organization ${org.name} (${org.id}) by user ${userId}`,
         );
         return org;
       },
       {
         timeout: 30000,
         maxWait: 15000,
-      }
+      },
     );
   }
 

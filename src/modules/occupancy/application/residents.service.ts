@@ -35,7 +35,9 @@ export class ResidentsService {
         where: { id: dto.bedId, organizationId: orgId },
         include: {
           residents: {
-            where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+            where: {
+              status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+            },
           },
         },
       });
@@ -598,19 +600,14 @@ export class ResidentsService {
         });
       }
 
-      // Close occupancy record
-      const activeRecord = await tx.occupancyRecord.findFirst({
+      // Close any active occupancy records in one write.
+      await tx.occupancyRecord.updateMany({
         where: { residentId: id, endDate: null },
+        data: {
+          endDate: dto.moveOutDate,
+          reason: 'move_out',
+        },
       });
-      if (activeRecord) {
-        await tx.occupancyRecord.update({
-          where: { id: activeRecord.id },
-          data: {
-            endDate: dto.moveOutDate,
-            reason: 'move_out',
-          },
-        });
-      }
 
       // Update resident status
       const updated = await tx.resident.update({
@@ -654,19 +651,27 @@ export class ResidentsService {
     tx: Prisma.TransactionClient,
     roomId: string,
   ) {
-    const beds = await tx.bed.findMany({
+    const bedCounts = await tx.bed.groupBy({
+      by: ['status'],
       where: { roomId, status: { not: 'ARCHIVED' } },
+      _count: true,
     });
 
-    if (beds.length === 0) return;
-
-    const occupiedBeds = beds.filter((b) => b.status === 'OCCUPIED');
+    let totalBeds = 0;
+    let occupiedBeds = 0;
+    for (const bedCount of bedCounts) {
+      totalBeds += bedCount._count;
+      if (bedCount.status === 'OCCUPIED') {
+        occupiedBeds = bedCount._count;
+      }
+    }
+    if (totalBeds === 0) return;
 
     let newStatus: 'AVAILABLE' | 'PARTIALLY_OCCUPIED' | 'OCCUPIED' =
       'AVAILABLE';
-    if (occupiedBeds.length === beds.length) {
+    if (occupiedBeds === totalBeds) {
       newStatus = 'OCCUPIED';
-    } else if (occupiedBeds.length > 0) {
+    } else if (occupiedBeds > 0) {
       newStatus = 'PARTIALLY_OCCUPIED';
     }
 

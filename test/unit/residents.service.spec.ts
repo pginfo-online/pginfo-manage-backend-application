@@ -14,6 +14,7 @@ describe('ResidentsService', () => {
       bed: {
         findFirst: vi.fn(),
         update: vi.fn(),
+        groupBy: vi.fn().mockResolvedValue([]),
         findMany: vi.fn().mockResolvedValue([]),
       },
       room: {
@@ -29,6 +30,7 @@ describe('ResidentsService', () => {
       occupancyRecord: {
         create: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn(),
         findFirst: vi.fn(),
       },
       billingRecord: {
@@ -95,5 +97,63 @@ describe('ResidentsService', () => {
     await expect(service.findById('nonexistent', 'org-1')).rejects.toThrow(
       NotFoundError,
     );
+  });
+
+  it('should recalculate room status using grouped bed counts during move-out', async () => {
+    mockPrisma.resident.findFirst.mockResolvedValue({
+      id: 'res-1',
+      organizationId: 'org-1',
+      status: 'ACTIVE',
+      bedId: 'bed-1',
+      roomId: 'room-1',
+      notes: null,
+    });
+    mockPrisma.resident.update.mockResolvedValue({ id: 'res-1' });
+    mockPrisma.bed.groupBy.mockResolvedValue([
+      { status: 'AVAILABLE', _count: 1 },
+      { status: 'OCCUPIED', _count: 1 },
+    ]);
+
+    await service.moveOut(
+      'res-1',
+      { moveOutDate: new Date('2026-11-02') },
+      'org-1',
+      'user-1',
+    );
+
+    expect(mockPrisma.occupancyRecord.updateMany).toHaveBeenCalledWith({
+      where: { residentId: 'res-1', endDate: null },
+      data: { endDate: new Date('2026-11-02'), reason: 'move_out' },
+    });
+    expect(mockPrisma.bed.groupBy).toHaveBeenCalledWith({
+      by: ['status'],
+      where: { roomId: 'room-1', status: { not: 'ARCHIVED' } },
+      _count: true,
+    });
+    expect(mockPrisma.room.update).toHaveBeenCalledWith({
+      where: { id: 'room-1' },
+      data: { status: 'PARTIALLY_OCCUPIED' },
+    });
+  });
+
+  it('should leave room status unchanged when it has no non-archived beds', async () => {
+    mockPrisma.resident.findFirst.mockResolvedValue({
+      id: 'res-1',
+      organizationId: 'org-1',
+      status: 'ACTIVE',
+      bedId: null,
+      roomId: 'room-1',
+      notes: null,
+    });
+    mockPrisma.resident.update.mockResolvedValue({ id: 'res-1' });
+
+    await service.moveOut(
+      'res-1',
+      { moveOutDate: new Date('2026-11-02') },
+      'org-1',
+      'user-1',
+    );
+
+    expect(mockPrisma.room.update).not.toHaveBeenCalled();
   });
 });
