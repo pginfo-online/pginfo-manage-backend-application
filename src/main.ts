@@ -8,6 +8,7 @@ import { GlobalExceptionFilter } from './common/errors/index.js';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true, // Buffer logs until Pino logger is attached
+    rawBody: true,    // Retain exact raw unparsed request bytes for webhook HMAC verification
   });
 
   // ── Structured Logging ───────────────────────────────────

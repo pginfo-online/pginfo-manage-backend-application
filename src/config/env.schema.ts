@@ -45,6 +45,7 @@ export const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional().default(''),
   RAZORPAY_KEY_SECRET: z.string().optional().default(''),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional().default(''),
+  PLATFORM_FEE_PAISE: z.coerce.number().int().nonnegative().default(3000), // Platform cut in paise (e.g. ₹30.00 = 3000 paise)
 
   // ── Email (Resend) ───────────────────────────────────────────
   RESEND_API_KEY: z.string().optional().default(''),

@@ -94,6 +94,40 @@ export class RoomsController {
     return this.roomsService.update(id, dto, orgId, userId);
   }
 
+  @Get('properties/:propertyId/inventory-stats')
+  @ApiOperation({ summary: 'Get comprehensive 17-point inventory statistics for a property' })
+  @ApiResponse({ status: 200, description: 'Inventory statistics' })
+  async getInventoryStats(
+    @Param('propertyId', new ParseUUIDPipe()) propertyId: string,
+    @CurrentOrgId() orgId: string,
+  ) {
+    return this.roomsService.getInventoryStats(propertyId, orgId);
+  }
+
+  @Patch('rooms/:id/toggle-disable-rent')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  @ApiOperation({ summary: 'Toggle disable/enable room for rent' })
+  @ApiResponse({ status: 200, description: 'Room rent availability toggled' })
+  async toggleDisableRent(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.roomsService.toggleDisableRent(id, orgId, userId);
+  }
+
+  @Patch('rooms/:id/toggle-publish')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  @ApiOperation({ summary: 'Toggle room publication status' })
+  @ApiResponse({ status: 200, description: 'Room publication toggled' })
+  async togglePublish(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.roomsService.togglePublish(id, orgId, userId);
+  }
+
   @Delete('rooms/:id')
   @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
   @ApiOperation({ summary: 'Archive a room' })

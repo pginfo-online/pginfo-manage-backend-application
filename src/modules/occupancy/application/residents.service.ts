@@ -35,7 +35,7 @@ export class ResidentsService {
         where: { id: dto.bedId, organizationId: orgId },
         include: {
           residents: {
-            where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+            where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
           },
         },
       });
@@ -183,7 +183,55 @@ export class ResidentsService {
       }),
     ]);
 
-    return buildOffsetResponse(residents, total, query.page, query.limit);
+    const residentIds = residents.map((r) => r.id);
+
+    // Group-by billing records for authoritatively computing outstanding dues & overdue status
+    const [unpaidRecords, overdueRecords] = await Promise.all([
+      residentIds.length > 0
+        ? this.prisma.billingRecord.groupBy({
+            by: ['residentId'],
+            where: {
+              residentId: { in: residentIds },
+              organizationId: orgId,
+              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+            },
+            _sum: {
+              amount: true,
+              paidAmount: true,
+            },
+          })
+        : [],
+      residentIds.length > 0
+        ? this.prisma.billingRecord.findMany({
+            where: {
+              residentId: { in: residentIds },
+              organizationId: orgId,
+              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+              dueDate: { lt: new Date() },
+            },
+            select: { residentId: true },
+          })
+        : [],
+    ]);
+
+    const overdueSet = new Set(overdueRecords.map((o) => o.residentId));
+    const duesMap = new Map<string, number>();
+    for (const rec of unpaidRecords) {
+      const amount = rec._sum.amount ?? 0;
+      const paid = rec._sum.paidAmount ?? 0;
+      duesMap.set(rec.residentId, Math.max(0, amount - paid));
+    }
+
+    const formatted = residents.map((r) => {
+      const dues = duesMap.get(r.id) ?? 0;
+      return {
+        ...r,
+        dues,
+        isOverdue: overdueSet.has(r.id),
+      };
+    });
+
+    return buildOffsetResponse(formatted, total, query.page, query.limit);
   }
 
   /**

@@ -11,6 +11,14 @@ export const createRoomSchema = z.object({
     .positive('Rent amount must be positive paise'),
   amenities: z.array(z.string()).default([]),
   description: z.string().optional(),
+  unitType: z.string().trim().default('Room'),
+  gender: z.string().trim().default('UNISEX'),
+  remarks: z.string().trim().optional(),
+  lockInPeriod: z.string().trim().default('No Lock-in'),
+  isDisabledForRent: z.boolean().default(false),
+  isPublished: z.boolean().default(true),
+  images: z.array(z.string()).default([]),
+  isVerified: z.boolean().default(true),
   availableFrom: z
     .string()
     .datetime()
@@ -20,7 +28,9 @@ export const createRoomSchema = z.object({
    * If provided, automatically generates beds for this room.
    * e.g. ["A", "B"] or 2
    */
-  initialBedCount: z.coerce.number().int().min(1).max(10).optional(),
+  initialBedCount: z.coerce.number().int().min(1).max(20).optional(),
+  bedNames: z.array(z.string()).optional(),
+  bedRents: z.record(z.string(), z.number()).optional(),
 });
 
 export type CreateRoomDto = z.infer<typeof createRoomSchema>;
@@ -33,6 +43,14 @@ export const updateRoomSchema = z.object({
   status: z.nativeEnum(RoomStatus).optional(),
   amenities: z.array(z.string()).optional(),
   description: z.string().optional(),
+  unitType: z.string().trim().optional(),
+  gender: z.string().trim().optional(),
+  remarks: z.string().trim().nullable().optional(),
+  lockInPeriod: z.string().trim().optional(),
+  isDisabledForRent: z.boolean().optional(),
+  isPublished: z.boolean().optional(),
+  images: z.array(z.string()).optional(),
+  isVerified: z.boolean().optional(),
   availableFrom: z
     .string()
     .datetime()
@@ -45,6 +63,8 @@ export type UpdateRoomDto = z.infer<typeof updateRoomSchema>;
 export const createBedSchema = z.object({
   bedNumber: z.string().min(1, 'Bed number is required').trim(),
   rentAmount: z.coerce.number().int().positive().optional(),
+  isDisabledForRent: z.boolean().default(false),
+  remarks: z.string().trim().optional(),
 });
 
 export type CreateBedDto = z.infer<typeof createBedSchema>;
@@ -53,6 +73,8 @@ export const updateBedSchema = z.object({
   bedNumber: z.string().min(1).trim().optional(),
   status: z.nativeEnum(BedStatus).optional(),
   rentAmount: z.coerce.number().int().positive().nullable().optional(),
+  isDisabledForRent: z.boolean().optional(),
+  remarks: z.string().trim().nullable().optional(),
 });
 
 export type UpdateBedDto = z.infer<typeof updateBedSchema>;

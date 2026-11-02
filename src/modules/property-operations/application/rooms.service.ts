@@ -58,21 +58,36 @@ export class RoomsService {
           rentAmount: dto.rentAmount,
           amenities: dto.amenities,
           description: dto.description,
+          unitType: dto.unitType || 'Room',
+          gender: dto.gender || 'UNISEX',
+          remarks: dto.remarks,
+          lockInPeriod: dto.lockInPeriod || 'No Lock-in',
+          isDisabledForRent: dto.isDisabledForRent ?? false,
+          isPublished: dto.isPublished ?? true,
+          images: dto.images ?? [],
+          isVerified: dto.isVerified ?? true,
           availableFrom: dto.availableFrom,
         },
       });
 
-      if (dto.initialBedCount && dto.initialBedCount > 0) {
-        const bedLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
-        const bedsData = Array.from(
-          { length: dto.initialBedCount },
-          (_, i) => ({
-            roomId: room.id,
-            organizationId: orgId,
-            bedNumber: bedLetters[i] ?? `${i + 1}`,
-            status: 'AVAILABLE' as const,
-          }),
-        );
+      const bedNames =
+        dto.bedNames && dto.bedNames.length > 0
+          ? dto.bedNames
+          : dto.initialBedCount && dto.initialBedCount > 0
+            ? Array.from({ length: dto.initialBedCount }, (_, i) => {
+                const bedLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+                return `Bed${bedLetters[i] ?? `${i + 1}`}`;
+              })
+            : [];
+
+      if (bedNames.length > 0) {
+        const bedsData = bedNames.map((name) => ({
+          roomId: room.id,
+          organizationId: orgId,
+          bedNumber: name,
+          status: 'AVAILABLE' as const,
+          rentAmount: dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
+        }));
 
         await tx.bed.createMany({ data: bedsData });
       }
@@ -113,11 +128,22 @@ export class RoomsService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
               select: {
                 id: true,
                 firstName: true,
                 lastName: true,
+                status: true,
+                mobile: true,
+              },
+            },
+            bookings: {
+              where: { status: { in: ['CONFIRMED'] } },
+              select: {
+                id: true,
+                guestName: true,
+                guestMobile: true,
+                expectedMoveIn: true,
                 status: true,
               },
             },
@@ -148,7 +174,7 @@ export class RoomsService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
               select: {
                 id: true,
                 firstName: true,
@@ -157,6 +183,16 @@ export class RoomsService {
                 status: true,
                 monthlyRent: true,
                 joiningDate: true,
+              },
+            },
+            bookings: {
+              where: { status: { in: ['CONFIRMED'] } },
+              select: {
+                id: true,
+                guestName: true,
+                guestMobile: true,
+                expectedMoveIn: true,
+                status: true,
               },
             },
           },
@@ -234,7 +270,7 @@ export class RoomsService {
     const activeResidents = await this.prisma.resident.count({
       where: {
         roomId: id,
-        status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
+        status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
       },
     });
 
@@ -300,6 +336,8 @@ export class RoomsService {
         organizationId: orgId,
         bedNumber: dto.bedNumber,
         rentAmount: dto.rentAmount,
+        isDisabledForRent: dto.isDisabledForRent ?? false,
+        remarks: dto.remarks,
       },
     });
 
@@ -383,7 +421,7 @@ export class RoomsService {
     const activeResident = await this.prisma.resident.findFirst({
       where: {
         bedId,
-        status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
+        status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
       },
     });
 
@@ -409,5 +447,228 @@ export class RoomsService {
     });
 
     return { success: true, message: 'Bed archived successfully' };
+  }
+
+  /**
+   * Toggles whether a room is disabled for rent.
+   */
+  async toggleDisableRent(id: string, orgId: string, userId: string) {
+    const room = await this.prisma.room.findFirst({
+      where: { id, organizationId: orgId },
+    });
+
+    if (!room) {
+      throw new NotFoundError('Room', id);
+    }
+
+    const updated = await this.prisma.room.update({
+      where: { id },
+      data: { isDisabledForRent: !room.isDisabledForRent },
+      include: { beds: true },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: orgId,
+        userId,
+        action: updated.isDisabledForRent ? 'room.disable_rent' : 'room.enable_rent',
+        entityType: 'Room',
+        entityId: id,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Toggles whether a room is published to marketplace/listings.
+   */
+  async togglePublish(id: string, orgId: string, userId: string) {
+    const room = await this.prisma.room.findFirst({
+      where: { id, organizationId: orgId },
+    });
+
+    if (!room) {
+      throw new NotFoundError('Room', id);
+    }
+
+    const updated = await this.prisma.room.update({
+      where: { id },
+      data: { isPublished: !room.isPublished },
+      include: { beds: true },
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: orgId,
+        userId,
+        action: updated.isPublished ? 'room.publish' : 'room.unpublish',
+        entityType: 'Room',
+        entityId: id,
+      },
+    });
+
+    return updated;
+  }
+
+  /**
+   * Calculates comprehensive inventory statistics for a property.
+   * Covers all 17 KPI metrics required for production-scale management.
+   */
+  async getInventoryStats(propertyId: string, orgId: string) {
+    const property = await this.prisma.property.findFirst({
+      where: { id: propertyId, organizationId: orgId },
+    });
+
+    if (!property) {
+      throw new NotFoundError('Property', propertyId);
+    }
+
+    const rooms = await this.prisma.room.findMany({
+      where: { propertyId, status: { not: 'ARCHIVED' } },
+      include: {
+        beds: {
+          where: { status: { not: 'ARCHIVED' } },
+          include: {
+            residents: {
+              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+            },
+            bookings: {
+              where: { status: { in: ['CONFIRMED'] } },
+            },
+          },
+        },
+      },
+    });
+
+    const [confirmedBookingsCount, pendingResidentsCount] = await Promise.all([
+      this.prisma.booking.count({
+        where: {
+          propertyId,
+          organizationId: orgId,
+          status: 'CONFIRMED',
+        },
+      }),
+      this.prisma.resident.count({
+        where: {
+          propertyId,
+          organizationId: orgId,
+          status: 'PENDING_MOVE_IN',
+        },
+      }),
+    ]);
+    const newBookingsCount = (confirmedBookingsCount || 0) + (pendingResidentsCount || 0);
+
+    let totalBeds = 0;
+    let vacantRooms = 0;
+    let semiVacantRooms = 0;
+    let vacantBeds = 0;
+    let overbookedRooms = 0;
+    let overbookedBeds = 0;
+    let occupiedRooms = 0;
+    let occupiedBeds = 0;
+    let underNoticeTenants = 0;
+    let unverifiedRooms = 0;
+    let maleRooms = 0;
+    let femaleRooms = 0;
+    let underNoticeWithBooking = 0;
+    let disabledForRent = 0;
+    let disabledForRentBeds = 0;
+
+    for (const room of rooms) {
+      if (room.isDisabledForRent) {
+        disabledForRent++;
+      }
+      if (!room.isVerified) {
+        unverifiedRooms++;
+      }
+      if (room.gender === 'MALE') {
+        maleRooms++;
+      } else if (room.gender === 'FEMALE') {
+        femaleRooms++;
+      }
+
+      const roomBedCount = room.beds.length;
+      totalBeds += roomBedCount;
+
+      let roomOccupiedBeds = 0;
+      let roomBookings = 0;
+
+      for (const bed of room.beds) {
+        const isBedDisabled = bed.isDisabledForRent || room.isDisabledForRent;
+        if (isBedDisabled) {
+          disabledForRentBeds++;
+        }
+
+        const activeResidents = bed.residents.filter((r) => r.status === 'ACTIVE');
+        const noticeResidents = bed.residents.filter(
+          (r) => r.status === 'NOTICE_PERIOD',
+        );
+        const pendingResidents = bed.residents.filter(
+          (r) => r.status === 'PENDING_MOVE_IN',
+        );
+        const totalResidents =
+          activeResidents.length + noticeResidents.length + pendingResidents.length;
+        const totalBookings = bed.bookings.length;
+
+        underNoticeTenants += noticeResidents.length;
+        if (noticeResidents.length > 0 && totalBookings > 0) {
+          underNoticeWithBooking += 1;
+        }
+
+        const isAllocated =
+          totalResidents > 0 ||
+          bed.status === 'OCCUPIED' ||
+          bed.status === 'RESERVED';
+
+        if (isAllocated) {
+          const count = Math.max(1, totalResidents);
+          occupiedBeds += count;
+          roomOccupiedBeds += count;
+        } else if (!isBedDisabled && bed.status === 'AVAILABLE' && totalBookings === 0) {
+          vacantBeds++;
+        }
+
+        if (totalResidents > 1 || (totalResidents >= 1 && totalBookings > 0)) {
+          overbookedBeds++;
+        }
+
+        roomBookings += totalBookings;
+      }
+
+      if (roomOccupiedBeds > 0) {
+        occupiedRooms++;
+      }
+
+      if (roomBedCount > 0 && roomOccupiedBeds === 0 && !room.isDisabledForRent) {
+        vacantRooms++;
+      } else if (roomOccupiedBeds > 0 && roomOccupiedBeds < roomBedCount) {
+        semiVacantRooms++;
+      }
+
+      if (roomOccupiedBeds + roomBookings > roomBedCount && roomBedCount > 0) {
+        overbookedRooms++;
+      }
+    }
+
+    return {
+      totalRooms: rooms.length,
+      totalBeds,
+      vacantRooms,
+      semiVacantRooms,
+      vacantBeds,
+      overbookedRooms,
+      overbookedBeds,
+      occupiedRooms,
+      occupiedBeds,
+      newBookings: newBookingsCount,
+      underNoticeTenants,
+      unverifiedRooms,
+      maleRooms,
+      femaleRooms,
+      underNoticeWithBooking,
+      disabledForRent,
+      disabledForRentBeds,
+    };
   }
 }

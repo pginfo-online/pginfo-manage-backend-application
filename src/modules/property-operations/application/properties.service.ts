@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
+import { Monetary } from '../../finance/domain/monetary.js';
 import type {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -87,24 +88,81 @@ export class PropertiesService {
         take: query.limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          _count: {
-            select: {
-              rooms: { where: { status: { not: 'ARCHIVED' } } },
-              residents: {
-                where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+          rooms: {
+            where: { status: { not: 'ARCHIVED' } },
+            include: {
+              beds: {
+                where: { status: { not: 'ARCHIVED' } },
+                select: { id: true, status: true },
               },
             },
+          },
+          residents: {
+            where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+            select: { id: true, status: true },
+          },
+          bookings: {
+            where: { status: 'CONFIRMED' },
+            select: { id: true },
           },
         },
       }),
     ]);
 
-    const formatted = properties.map((p) => ({
-      ...p,
-      roomCount: p._count.rooms,
-      activeResidentCount: p._count.residents,
-      _count: undefined,
-    }));
+    const propertyIds = properties.map((p) => p.id);
+    const unpaidDuesByProperty =
+      propertyIds.length > 0
+        ? await this.prisma.billingRecord.groupBy({
+            by: ['propertyId'],
+            where: {
+              propertyId: { in: propertyIds },
+              organizationId: orgId,
+              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+            },
+            _sum: {
+              amount: true,
+              paidAmount: true,
+            },
+          })
+        : [];
+
+    const propertyDuesMap = new Map<string, number>();
+    for (const rec of unpaidDuesByProperty) {
+      const amount = rec._sum.amount ?? 0;
+      const paid = rec._sum.paidAmount ?? 0;
+      propertyDuesMap.set(rec.propertyId, Math.max(0, amount - paid));
+    }
+
+    const formatted = properties.map((p) => {
+      const roomCount = p.rooms.length;
+      const allBeds = p.rooms.flatMap((r) => r.beds);
+      const totalBeds = allBeds.length;
+      const occupiedBeds = allBeds.filter(
+        (b) => b.status === 'OCCUPIED' || b.status === 'RESERVED',
+      ).length;
+      const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
+      const activeTenants = p.residents.length;
+      const bookingsCount = p.bookings.length;
+      const pendingDuesPaise = propertyDuesMap.get(p.id) ?? 0;
+
+      const { rooms, residents, bookings, ...rest } = p;
+
+      return {
+        ...rest,
+        roomCount,
+        roomsCount: roomCount,
+        totalRooms: roomCount,
+        totalBeds,
+        occupiedBeds,
+        vacantBeds,
+        activeTenants,
+        activeResidentCount: activeTenants,
+        currentResidents: activeTenants,
+        bookingsCount,
+        pendingDuesPaise,
+        pendingDuesFormatted: Monetary.formatINR(pendingDuesPaise),
+      };
+    });
 
     return buildOffsetResponse(formatted, total, query.page, query.limit);
   }
@@ -120,7 +178,7 @@ export class PropertiesService {
           select: {
             rooms: { where: { status: { not: 'ARCHIVED' } } },
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
             },
             staff: { where: { status: 'ACTIVE' } },
             complaints: { where: { status: { not: 'RESOLVED' } } },
@@ -151,7 +209,7 @@ export class PropertiesService {
 
     for (const stat of bedStats) {
       totalBeds += stat._count;
-      if (stat.status === 'OCCUPIED') occupiedBeds += stat._count;
+      if (stat.status === 'OCCUPIED' || stat.status === 'RESERVED') occupiedBeds += stat._count;
       if (stat.status === 'AVAILABLE') availableBeds += stat._count;
     }
 
@@ -288,7 +346,7 @@ export class PropertiesService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD'] } },
+              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
               select: {
                 id: true,
                 firstName: true,
@@ -320,7 +378,11 @@ export class PropertiesService {
 
       for (const bed of room.beds) {
         totalBeds++;
-        if (bed.residents.length > 0) {
+        const isBedOccupied =
+          bed.residents.length > 0 ||
+          bed.status === 'OCCUPIED' ||
+          bed.status === 'RESERVED';
+        if (isBedOccupied) {
           occupiedBeds++;
         }
       }
@@ -339,7 +401,10 @@ export class PropertiesService {
           beds: r.beds.map((b) => ({
             id: b.id,
             bedNumber: b.bedNumber,
-            status: b.residents.length > 0 ? 'OCCUPIED' : b.status,
+            status:
+              b.residents.length > 0 || b.status === 'RESERVED'
+                ? 'OCCUPIED'
+                : b.status,
             rentAmount: b.rentAmount ?? r.rentAmount,
             resident: b.residents[0] ?? null,
           })),

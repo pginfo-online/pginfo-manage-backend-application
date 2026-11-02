@@ -36,6 +36,7 @@ model User {
   memberships     OrganizationMember[]
   refreshTokens   RefreshToken[]
   auditLogs       AuditLog[]
+  payoutAccounts  LandlordPayoutAccount[]
 
   @@map("users")
 }
@@ -73,9 +74,12 @@ model Organization {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  members    OrganizationMember[]
-  properties Property[]
-  auditLogs  AuditLog[]
+  members        OrganizationMember[]
+  properties     Property[]
+  auditLogs      AuditLog[]
+  payoutAccounts LandlordPayoutAccount[]
+  mandates       TenantMandate[]
+  rentInvoices   RentInvoice[]
 
   @@map("organizations")
 }
@@ -177,6 +181,9 @@ model Property {
   bookings     Booking[]
   subMeters    SubMeter[]
   agreementTemplates AgreementTemplate[]
+  payoutAccounts LandlordPayoutAccount[]
+  mandates       TenantMandate[]
+  rentInvoices   RentInvoice[]
 
   @@index([organizationId])
   @@unique([organizationId, name]) // Property names unique within org
@@ -223,6 +230,14 @@ model Room {
   amenities      String[]    @default([])
   description    String?
   availableFrom  DateTime?   @map("available_from") @db.Timestamptz
+  unitType       String      @default("Room") @map("unit_type")
+  gender         String      @default("UNISEX") @map("gender") // "MALE", "FEMALE", "UNISEX"
+  remarks        String?     @map("remarks")
+  lockInPeriod   String?     @default("No Lock-in") @map("lock_in_period")
+  isDisabledForRent Boolean  @default(false) @map("is_disabled_for_rent")
+  isPublished    Boolean     @default(true) @map("is_published")
+  images         String[]    @default([]) @map("images")
+  isVerified     Boolean     @default(true) @map("is_verified")
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -231,6 +246,8 @@ model Room {
   beds         Bed[]
   residents    Resident[]
   complaints   Complaint[]
+  mandates     TenantMandate[]
+  rentInvoices RentInvoice[]
 
   @@unique([propertyId, roomNumber]) // Room numbers unique within property
   @@index([organizationId])
@@ -256,6 +273,8 @@ model Bed {
   bedNumber      String    @map("bed_number")
   status         BedStatus @default(AVAILABLE)
   rentAmount     Int?      @map("rent_amount") // Override room rent in paise; null = use room rent
+  isDisabledForRent Boolean @default(false) @map("is_disabled_for_rent")
+  remarks        String?   @map("remarks")
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -263,6 +282,7 @@ model Bed {
   room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
   residents Resident[]
   bookings  Booking[]
+  mandates  TenantMandate[]
 
   @@unique([roomId, bedNumber]) // Bed numbers unique within room
   @@index([organizationId])
@@ -333,6 +353,8 @@ model Resident {
   billingRecords BillingRecord[]
   payments    Payment[]
   occupancyHistory OccupancyRecord[]
+  mandates    TenantMandate[]
+  rentInvoices RentInvoice[]
 
   @@index([organizationId])
   @@index([propertyId])
@@ -422,8 +444,9 @@ model BillingRecord {
   updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  resident  Resident  @relation(fields: [residentId], references: [id])
-  payments  Payment[]
+  resident     Resident      @relation(fields: [residentId], references: [id])
+  payments     Payment[]
+  rentInvoices RentInvoice[]
 
   @@index([organizationId])
   @@index([residentId])
@@ -905,4 +928,213 @@ model AgreementTemplate {
 
   @@index([organizationId])
   @@map("agreement_templates")
+}
+
+// ════════════════════════════════════════════════════════════════
+// Autopay Rent Collection & Subscriptions (Razorpay & Route)
+// ════════════════════════════════════════════════════════════════
+
+enum PayoutAccountStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  REJECTED
+
+  @@map("payout_account_status")
+}
+
+enum KycStatus {
+  PENDING
+  SUBMITTED
+  VERIFIED
+  REJECTED
+
+  @@map("kyc_status")
+}
+
+enum MandateStatus {
+  CREATED
+  AUTHENTICATED
+  ACTIVE
+  PENDING
+  PAUSED
+  REVOKED
+  COMPLETED
+  EXPIRED
+
+  @@map("mandate_status")
+}
+
+enum MandateChannel {
+  UPI
+  EMANDATE
+  CARD
+
+  @@map("mandate_channel")
+}
+
+enum MandateCollectionMode {
+  AUTOPAY
+  MANUAL_COLLECTION
+
+  @@map("mandate_collection_mode")
+}
+
+enum RentInvoiceStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+
+  @@map("rent_invoice_status")
+}
+
+enum RentCollectionType {
+  AUTOPAY
+  MANUAL_COLLECTION
+  FALLBACK_LINK
+
+  @@map("rent_collection_type")
+}
+
+model LandlordPayoutAccount {
+  id                  String              @id @default(uuid()) @db.Uuid
+  organizationId      String              @map("organization_id") @db.Uuid
+  userId              String              @map("user_id") @db.Uuid
+  propertyId          String?             @map("property_id") @db.Uuid
+  razorpayAccountId   String              @unique @map("razorpay_account_id") // acc_xxxx
+  businessName        String              @map("business_name")
+  businessType        String              @default("individual") @map("business_type")
+  accountNumberMasked String              @map("account_number_masked")
+  ifscCode            String              @map("ifsc_code")
+  beneficiaryName     String              @map("beneficiary_name")
+  email               String
+  phone               String
+  status              PayoutAccountStatus @default(ACTIVE)
+  kycStatus           KycStatus           @default(VERIFIED) @map("kyc_status")
+  metadata            Json?
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property     Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  mandates     TenantMandate[]
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([propertyId])
+  @@index([status])
+  @@map("landlord_payout_accounts")
+}
+
+model TenantMandate {
+  id                      String                @id @default(uuid()) @db.Uuid
+  organizationId          String                @map("organization_id") @db.Uuid
+  tenantId                String                @map("tenant_id") @db.Uuid
+  propertyId              String                @map("property_id") @db.Uuid
+  unitId                  String?               @map("unit_id") @db.Uuid
+  bedId                   String?               @map("bed_id") @db.Uuid
+  landlordPayoutAccountId String?               @map("landlord_payout_account_id") @db.Uuid
+  razorpayPlanId          String?               @map("razorpay_plan_id")
+  razorpaySubscriptionId  String                @unique @map("razorpay_subscription_id") // sub_xxxx
+  razorpayCustomerId      String?               @map("razorpay_customer_id")
+  razorpayTokenId         String?               @map("razorpay_token_id")
+  mandateChannel          MandateChannel        @default(UPI) @map("mandate_channel")
+  bankReference           String?               @map("bank_reference")
+  status                  MandateStatus         @default(CREATED)
+  collectionMode          MandateCollectionMode @default(AUTOPAY) @map("collection_mode")
+  rentAmount              Int                   @map("rent_amount") // In paise (e.g. ₹25,000 = 2500000 paise)
+  billingDay              Int                   @default(5) @map("billing_day") // 1-28
+  tenureMonths            Int                   @default(11) @map("tenure_months")
+  totalCount              Int                   @default(11) @map("total_count")
+  paidCount               Int                   @default(0) @map("paid_count")
+  shortUrl                String?               @map("short_url")
+  failureReason           String?               @map("failure_reason")
+  retryCount              Int                   @default(0) @map("retry_count")
+  startedAt               DateTime?             @map("started_at") @db.Timestamptz
+  nextChargeDate          DateTime?             @map("next_charge_date") @db.Timestamptz
+  cancelledAt             DateTime?             @map("cancelled_at") @db.Timestamptz
+  metadata                Json?
+  createdAt               DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tenant                Resident               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property              Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unit                  Room?                  @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  bed                   Bed?                   @relation(fields: [bedId], references: [id], onDelete: SetNull)
+  landlordPayoutAccount LandlordPayoutAccount? @relation(fields: [landlordPayoutAccountId], references: [id], onDelete: SetNull)
+  invoices              RentInvoice[]
+
+  @@index([organizationId])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([unitId])
+  @@index([status])
+  @@index([razorpaySubscriptionId])
+  @@map("tenant_mandates")
+}
+
+model RentInvoice {
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @map("organization_id") @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  propertyId         String             @map("property_id") @db.Uuid
+  unitId             String?            @map("unit_id") @db.Uuid
+  mandateId          String?            @map("mandate_id") @db.Uuid
+  billingRecordId    String?            @map("billing_record_id") @db.Uuid
+  invoiceNumber      String             @unique @map("invoice_number")
+  billingMonth       Int                @map("billing_month") // 1-12
+  billingYear        Int                @map("billing_year")
+  amount             Int                // Total rent in paise
+  platformFee        Int                @default(3000) @map("platform_fee") // Platform cut in paise (e.g. ₹30 = 3000 paise)
+  transferAmount     Int                @map("transfer_amount") // Landlord payout in paise (amount - platformFee)
+  status             RentInvoiceStatus  @default(PENDING)
+  collectionType     RentCollectionType @default(AUTOPAY) @map("collection_type")
+  dueDate            DateTime           @map("due_date") @db.Date
+  paidAt             DateTime?          @map("paid_at") @db.Timestamptz
+  razorpayPaymentId  String?            @map("razorpay_payment_id") // pay_xxxx
+  razorpayTransferId String?            @map("razorpay_transfer_id") // trf_xxxx
+  razorpayOrderId    String?            @map("razorpay_order_id")
+  fallbackPaymentUrl String?            @map("fallback_payment_url")
+  retryCount         Int                @default(0) @map("retry_count")
+  failureReason      String?            @map("failure_reason")
+  metadata           Json?
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tenant        Resident       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  property      Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  unit          Room?          @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  mandate       TenantMandate? @relation(fields: [mandateId], references: [id], onDelete: SetNull)
+  billingRecord BillingRecord? @relation(fields: [billingRecordId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, billingMonth, billingYear])
+  @@index([organizationId])
+  @@index([tenantId])
+  @@index([propertyId])
+  @@index([mandateId])
+  @@index([status])
+  @@index([razorpayPaymentId])
+  @@map("rent_invoices")
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  eventId     String   @unique @map("event_id")
+  eventType   String   @map("event_type")
+  payload     Json
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz
+  status      String   @default("SUCCESS") // SUCCESS, FAILED
+  error       String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([eventType])
+  @@index([processedAt])
+  @@map("webhook_events")
 }

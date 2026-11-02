@@ -41,7 +41,22 @@ export class PrismaService
     }
 
     this.logger.log('Connecting to database…');
-    await this.$connect();
+    let connected = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.$connect();
+        connected = true;
+        break;
+      } catch (err: any) {
+        this.logger.warn(
+          `Database connect attempt ${attempt} failed: ${err.message}. Retrying in 1.5s...`,
+        );
+        await new Promise((res) => setTimeout(res, 1500));
+      }
+    }
+    if (!connected) {
+      await this.$connect();
+    }
     this.logger.log('Database connected');
   }
 

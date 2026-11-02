@@ -92,66 +92,72 @@ export class OrganizationsService {
       slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const org = await tx.organization.create({
-        data: {
-          name: dto.name,
-          slug,
-        },
-      });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const org = await tx.organization.create({
+          data: {
+            name: dto.name,
+            slug,
+          },
+        });
 
-      // Bind creator as OWNER
-      await tx.organizationMember.create({
-        data: {
-          userId,
-          organizationId: org.id,
-          role: 'OWNER',
-        },
-      });
+        // Bind creator as OWNER
+        await tx.organizationMember.create({
+          data: {
+            userId,
+            organizationId: org.id,
+            role: "OWNER",
+          },
+        });
 
-      // Seed system expense categories for this org
-      await tx.expenseCategory.createMany({
-        data: SYSTEM_EXPENSE_CATEGORIES.map((name) => ({
-          organizationId: org.id,
-          name,
-          isSystem: true,
-        })),
-      });
+        // Seed system expense categories for this org
+        await tx.expenseCategory.createMany({
+          data: SYSTEM_EXPENSE_CATEGORIES.map((name) => ({
+            organizationId: org.id,
+            name,
+            isSystem: true,
+          })),
+        });
 
-      // Seed system complaint categories for this org
-      await tx.complaintCategory.createMany({
-        data: SYSTEM_COMPLAINT_CATEGORIES.map((name) => ({
-          organizationId: org.id,
-          name,
-          isSystem: true,
-        })),
-      });
+        // Seed system complaint categories for this org
+        await tx.complaintCategory.createMany({
+          data: SYSTEM_COMPLAINT_CATEGORIES.map((name) => ({
+            organizationId: org.id,
+            name,
+            isSystem: true,
+          })),
+        });
 
-      // Seed system staff designations for this org
-      await tx.staffDesignation.createMany({
-        data: SYSTEM_STAFF_DESIGNATIONS.map((name) => ({
-          organizationId: org.id,
-          name,
-          isSystem: true,
-        })),
-      });
+        // Seed system staff designations for this org
+        await tx.staffDesignation.createMany({
+          data: SYSTEM_STAFF_DESIGNATIONS.map((name) => ({
+            organizationId: org.id,
+            name,
+            isSystem: true,
+          })),
+        });
 
-      // Audit log
-      await tx.auditLog.create({
-        data: {
-          organizationId: org.id,
-          userId,
-          action: 'organization.create',
-          entityType: 'Organization',
-          entityId: org.id,
-        },
-      });
+        // Audit log
+        await tx.auditLog.create({
+          data: {
+            organizationId: org.id,
+            userId,
+            action: "organization.create",
+            entityType: "Organization",
+            entityId: org.id,
+          },
+        });
 
-      this.logger.log(
-        `Created organization ${org.name} (${org.id}) by user ${userId}`,
-      );
-      return org;
-    });
+        this.logger.log(
+          `Created organization ${org.name} (${org.id}) by user ${userId}`
+        );
+        return org;
+      },
+      {
+        timeout: 30000,
+        maxWait: 15000,
+      }
+    );
   }
 
   /**
