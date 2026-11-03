@@ -28,6 +28,7 @@ import { BookingsModule } from './modules/bookings/bookings.module.js';
 import { MetersModule } from './modules/meters/meters.module.js';
 import { TemplatesModule } from './modules/templates/templates.module.js';
 import { ReviewsModule } from './modules/reviews/reviews.module.js';
+import { AdminModule } from './modules/admin/admin.module.js';
 
 // Config
 import { validate } from './config/index.js';
@@ -82,6 +83,7 @@ import { validate } from './config/index.js';
     MetersModule,
     TemplatesModule,
     ReviewsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

@@ -19,39 +19,157 @@ datasource db {
 // ════════════════════════════════════════════════════════════════
 
 model User {
-  id             String   @id @default(uuid()) @db.Uuid
-  email          String   @unique
-  mobile         String?  @unique
-  passwordHash   String   @map("password_hash")
-  firstName      String   @map("first_name")
-  lastName       String?  @map("last_name")
-  emailVerified  Boolean  @default(false) @map("email_verified")
-  mobileVerified Boolean  @default(false) @map("mobile_verified")
-  isActive       Boolean  @default(true) @map("is_active")
+  id             String    @id @default(uuid()) @db.Uuid
+  email          String    @unique
+  mobile         String?   @unique
+  passwordHash   String    @map("password_hash")
+  firstName      String    @map("first_name")
+  lastName       String?   @map("last_name")
+  emailVerified  Boolean   @default(false) @map("email_verified")
+  mobileVerified Boolean   @default(false) @map("mobile_verified")
+  isActive       Boolean   @default(true) @map("is_active")
   lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  memberships     OrganizationMember[]
-  refreshTokens   RefreshToken[]
-  auditLogs       AuditLog[]
-  payoutAccounts  LandlordPayoutAccount[]
+  memberships             OrganizationMember[]
+  refreshTokens           RefreshToken[]
+  auditLogs               AuditLog[]
+  payoutAccounts          LandlordPayoutAccount[]
+  platformAdmin           PlatformAdmin?          @relation("PlatformAdminUser")
+  platformAdminsCreated   PlatformAdmin[]         @relation("PlatformAdminCreator")
+  adminCasesCreated       AdminCase[]             @relation("AdminCaseCreator")
+  adminCasesAssigned      AdminCase[]             @relation("AdminCaseAssignee")
+  platformSettingsUpdated PlatformSetting[]       @relation("PlatformSettingUpdater")
 
   @@map("users")
 }
 
+enum PlatformRole {
+  SUPER_ADMIN
+  OPERATIONS_ADMIN
+  FINANCE_ADMIN
+  SUPPORT_ADMIN
+  ANALYST
+  AUDITOR
+
+  @@map("platform_role")
+}
+
+enum PlatformAdminStatus {
+  ACTIVE
+  SUSPENDED
+  REVOKED
+
+  @@map("platform_admin_status")
+}
+
+model PlatformAdmin {
+  id                  String              @id @default(uuid()) @db.Uuid
+  userId              String              @unique @map("user_id") @db.Uuid
+  role                PlatformRole
+  status              PlatformAdminStatus @default(ACTIVE)
+  permissionOverrides String[]            @default([]) @map("permission_overrides")
+  createdByUserId     String?             @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  user      User  @relation("PlatformAdminUser", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("PlatformAdminCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([role, status])
+  @@map("platform_admins")
+}
+
+enum AdminCaseType {
+  PROPERTY_VERIFICATION
+  PAYOUT_KYC
+  PAYMENT_REVIEW
+  SUPPORT_ESCALATION
+  FRAUD_REVIEW
+  DATA_CORRECTION
+  OTHER
+
+  @@map("admin_case_type")
+}
+
+enum AdminCaseStatus {
+  OPEN
+  IN_REVIEW
+  BLOCKED
+  RESOLVED
+  REJECTED
+
+  @@map("admin_case_status")
+}
+
+enum AdminCasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+
+  @@map("admin_case_priority")
+}
+
+model AdminCase {
+  id               String            @id @default(uuid()) @db.Uuid
+  type             AdminCaseType
+  status           AdminCaseStatus   @default(OPEN)
+  priority         AdminCasePriority @default(MEDIUM)
+  title            String
+  description      String?           @db.Text
+  organizationId   String?           @map("organization_id") @db.Uuid
+  targetType       String?           @map("target_type")
+  targetId         String?           @map("target_id")
+  assignedToUserId String?           @map("assigned_to_user_id") @db.Uuid
+  createdByUserId  String            @map("created_by_user_id") @db.Uuid
+  resolution       String?           @db.Text
+  evidence         Json?
+  idempotencyKey   String?           @unique @map("idempotency_key")
+  dueAt            DateTime?         @map("due_at") @db.Timestamptz
+  closedAt         DateTime?         @map("closed_at") @db.Timestamptz
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  assignedTo User? @relation("AdminCaseAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  createdBy  User  @relation("AdminCaseCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([status, priority, createdAt])
+  @@index([organizationId])
+  @@index([targetType, targetId])
+  @@index([assignedToUserId])
+  @@map("admin_cases")
+}
+
+model PlatformSetting {
+  id              String   @id @default(uuid()) @db.Uuid
+  key             String   @unique
+  value           Json
+  description     String?
+  isPublic        Boolean  @default(false) @map("is_public")
+  version         Int      @default(1)
+  updatedByUserId String   @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  updatedBy User @relation("PlatformSettingUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@map("platform_settings")
+}
+
 model RefreshToken {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  tokenHash   String    @unique @map("token_hash")
-  family      String    @db.Uuid // Token family for rotation & reuse detection
-  expiresAt   DateTime  @map("expires_at") @db.Timestamptz
-  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz
-  replacedBy  String?   @map("replaced_by") @db.Uuid // Points to the successor token
-  userAgent   String?   @map("user_agent")
-  ipAddress   String?   @map("ip_address") @db.Inet
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  family     String    @db.Uuid // Token family for rotation & reuse detection
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  replacedBy String?   @map("replaced_by") @db.Uuid // Points to the successor token
+  userAgent  String?   @map("user_agent")
+  ipAddress  String?   @map("ip_address") @db.Inet
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -95,13 +213,13 @@ enum OrgRole {
 }
 
 model OrganizationMember {
-  id             String       @id @default(uuid()) @db.Uuid
-  userId         String       @map("user_id") @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  role           OrgRole      @default(VIEWER)
-  isActive       Boolean      @default(true) @map("is_active")
-  joinedAt       DateTime     @default(now()) @map("joined_at") @db.Timestamptz
-  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  role           OrgRole  @default(VIEWER)
+  isActive       Boolean  @default(true) @map("is_active")
+  joinedAt       DateTime @default(now()) @map("joined_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -146,48 +264,48 @@ model Property {
   status         PropertyStatus @default(ACTIVE)
 
   // Address
-  addressLine1   String         @map("address_line1")
-  addressLine2   String?        @map("address_line2")
-  city           String
-  state          String
-  pincode        String         @db.VarChar(6)
-  country        String         @default("IN") @db.VarChar(2)
+  addressLine1 String  @map("address_line1")
+  addressLine2 String? @map("address_line2")
+  city         String
+  state        String
+  pincode      String  @db.VarChar(6)
+  country      String  @default("IN") @db.VarChar(2)
 
   // Contact
-  ownerName      String?        @map("owner_name")
-  contactPhone   String?        @map("contact_phone")
-  contactEmail   String?        @map("contact_email")
+  ownerName    String? @map("owner_name")
+  contactPhone String? @map("contact_phone")
+  contactEmail String? @map("contact_email")
 
   // Configuration
-  timezone       String         @default("Asia/Kolkata")
-  rentDueDay     Int            @default(1) @map("rent_due_day")  // Day of month rent is due (1-28)
+  timezone   String @default("Asia/Kolkata")
+  rentDueDay Int    @default(1) @map("rent_due_day") // Day of month rent is due (1-28)
 
   // Metadata
-  description    String?
-  amenities      String[]       @default([])
-  totalFloors    Int?           @map("total_floors")
+  description String?
+  amenities   String[] @default([])
+  totalFloors Int?     @map("total_floors")
 
-  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  rooms        Room[]
-  residents    Resident[]
-  staff        Staff[]
-  expenses     Expense[]
-  complaints   Complaint[]
-  announcements Announcement[]
-  leads        Lead[]
-  bookings     Booking[]
-  subMeters    SubMeter[]
+  organization       Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rooms              Room[]
+  residents          Resident[]
+  staff              Staff[]
+  expenses           Expense[]
+  complaints         Complaint[]
+  announcements      Announcement[]
+  leads              Lead[]
+  bookings           Booking[]
+  subMeters          SubMeter[]
   agreementTemplates AgreementTemplate[]
-  payoutAccounts LandlordPayoutAccount[]
-  mandates       TenantMandate[]
-  rentInvoices   RentInvoice[]
+  payoutAccounts     LandlordPayoutAccount[]
+  mandates           TenantMandate[]
+  rentInvoices       RentInvoice[]
 
-  @@index([organizationId])
   @@unique([organizationId, name]) // Property names unique within org
+  @@index([organizationId])
   @@map("properties")
 }
 
@@ -220,30 +338,30 @@ enum SharingType {
 }
 
 model Room {
-  id             String      @id @default(uuid()) @db.Uuid
-  propertyId     String      @map("property_id") @db.Uuid
-  organizationId String      @map("organization_id") @db.Uuid
-  roomNumber     String      @map("room_number")
-  floor          String      @default("0") // Flexible: "Ground", "1", "Basement", etc.
-  sharingType    SharingType @map("sharing_type")
-  rentAmount     Int         @map("rent_amount") // In paise per bed/unit
-  status         RoomStatus  @default(AVAILABLE)
-  amenities      String[]    @default([])
-  description    String?
-  availableFrom  DateTime?   @map("available_from") @db.Timestamptz
-  unitType       String      @default("Room") @map("unit_type")
-  gender         String      @default("UNISEX") @map("gender") // "MALE", "FEMALE", "UNISEX"
-  remarks        String?     @map("remarks")
-  lockInPeriod   String?     @default("No Lock-in") @map("lock_in_period")
-  isDisabledForRent Boolean  @default(false) @map("is_disabled_for_rent")
-  isPublished    Boolean     @default(true) @map("is_published")
-  images         String[]    @default([]) @map("images")
-  isVerified     Boolean     @default(true) @map("is_verified")
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  id                String      @id @default(uuid()) @db.Uuid
+  propertyId        String      @map("property_id") @db.Uuid
+  organizationId    String      @map("organization_id") @db.Uuid
+  roomNumber        String      @map("room_number")
+  floor             String      @default("0") // Flexible: "Ground", "1", "Basement", etc.
+  sharingType       SharingType @map("sharing_type")
+  rentAmount        Int         @map("rent_amount") // In paise per bed/unit
+  status            RoomStatus  @default(AVAILABLE)
+  amenities         String[]    @default([])
+  description       String?
+  availableFrom     DateTime?   @map("available_from") @db.Timestamptz
+  unitType          String      @default("Room") @map("unit_type")
+  gender            String      @default("UNISEX") @map("gender") // "MALE", "FEMALE", "UNISEX"
+  remarks           String?     @map("remarks")
+  lockInPeriod      String?     @default("No Lock-in") @map("lock_in_period")
+  isDisabledForRent Boolean     @default(false) @map("is_disabled_for_rent")
+  isPublished       Boolean     @default(true) @map("is_published")
+  images            String[]    @default([]) @map("images")
+  isVerified        Boolean     @default(true) @map("is_verified")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  property     Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  property     Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   beds         Bed[]
   residents    Resident[]
   complaints   Complaint[]
@@ -268,19 +386,19 @@ enum BedStatus {
 }
 
 model Bed {
-  id             String    @id @default(uuid()) @db.Uuid
-  roomId         String    @map("room_id") @db.Uuid
-  organizationId String    @map("organization_id") @db.Uuid
-  bedNumber      String    @map("bed_number")
-  status         BedStatus @default(AVAILABLE)
-  rentAmount     Int?      @map("rent_amount") // Override room rent in paise; null = use room rent
-  isDisabledForRent Boolean @default(false) @map("is_disabled_for_rent")
-  remarks        String?   @map("remarks")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id                String    @id @default(uuid()) @db.Uuid
+  roomId            String    @map("room_id") @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  bedNumber         String    @map("bed_number")
+  status            BedStatus @default(AVAILABLE)
+  rentAmount        Int?      @map("rent_amount") // Override room rent in paise; null = use room rent
+  isDisabledForRent Boolean   @default(false) @map("is_disabled_for_rent")
+  remarks           String?   @map("remarks")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  room      Room       @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room      Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
   residents Resident[]
   bookings  Booking[]
   mandates  TenantMandate[]
@@ -314,53 +432,53 @@ enum Profession {
 }
 
 model Resident {
-  id              String         @id @default(uuid()) @db.Uuid
-  organizationId  String         @map("organization_id") @db.Uuid
-  propertyId      String         @map("property_id") @db.Uuid
-  roomId          String?        @map("room_id") @db.Uuid
-  bedId           String?        @map("bed_id") @db.Uuid
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  propertyId     String  @map("property_id") @db.Uuid
+  roomId         String? @map("room_id") @db.Uuid
+  bedId          String? @map("bed_id") @db.Uuid
 
   // Personal info
-  firstName       String         @map("first_name")
-  lastName        String?        @map("last_name")
-  email           String?
-  mobile          String
-  whatsappNumber  String?        @map("whatsapp_number")
-  emergencyContact String?       @map("emergency_contact")
-  permanentAddress String?       @map("permanent_address")
-  parentName       String?       @map("parent_name")
-  parentPhone      String?       @map("parent_phone")
-  idProofUrl       String?       @map("id_proof_url")
-  agreementUrl     String?       @map("agreement_url")
-  profession      Profession     @default(OTHER)
+  firstName        String     @map("first_name")
+  lastName         String?    @map("last_name")
+  email            String?
+  mobile           String
+  whatsappNumber   String?    @map("whatsapp_number")
+  emergencyContact String?    @map("emergency_contact")
+  permanentAddress String?    @map("permanent_address")
+  parentName       String?    @map("parent_name")
+  parentPhone      String?    @map("parent_phone")
+  idProofUrl       String?    @map("id_proof_url")
+  agreementUrl     String?    @map("agreement_url")
+  profession       Profession @default(OTHER)
 
   // Tenancy
-  status          ResidentStatus @default(PENDING_MOVE_IN)
-  monthlyRent     Int            @map("monthly_rent") // paise
-  securityDeposit Int            @default(0) @map("security_deposit") // paise
-  joiningDate     DateTime       @map("joining_date") @db.Date
-  moveInDate      DateTime?      @map("move_in_date") @db.Date
-  moveOutDate     DateTime?      @map("move_out_date") @db.Date
-  expectedVacatingDate DateTime? @map("expected_vacating_date") @db.Date
-  lockInEndDate   DateTime?      @map("lock_in_end_date") @db.Date
-  rentDueDay      Int?           @map("rent_due_day") // Override property default
+  status               ResidentStatus @default(PENDING_MOVE_IN)
+  monthlyRent          Int            @map("monthly_rent") // paise
+  securityDeposit      Int            @default(0) @map("security_deposit") // paise
+  joiningDate          DateTime       @map("joining_date") @db.Date
+  moveInDate           DateTime?      @map("move_in_date") @db.Date
+  moveOutDate          DateTime?      @map("move_out_date") @db.Date
+  expectedVacatingDate DateTime?      @map("expected_vacating_date") @db.Date
+  lockInEndDate        DateTime?      @map("lock_in_end_date") @db.Date
+  rentDueDay           Int?           @map("rent_due_day") // Override property default
 
   // Metadata
-  notes           String?
-  version         Int            @default(1) // Optimistic concurrency
+  notes   String?
+  version Int     @default(1) // Optimistic concurrency
 
-  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime       @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  property    Property    @relation(fields: [propertyId], references: [id])
-  room        Room?       @relation(fields: [roomId], references: [id])
-  bed         Bed?        @relation(fields: [bedId], references: [id])
-  billingRecords BillingRecord[]
-  payments    Payment[]
+  property         Property          @relation(fields: [propertyId], references: [id])
+  room             Room?             @relation(fields: [roomId], references: [id])
+  bed              Bed?              @relation(fields: [bedId], references: [id])
+  billingRecords   BillingRecord[]
+  payments         Payment[]
   occupancyHistory OccupancyRecord[]
-  mandates    TenantMandate[]
-  rentInvoices RentInvoice[]
+  mandates         TenantMandate[]
+  rentInvoices     RentInvoice[]
 
   @@index([organizationId])
   @@index([propertyId])
@@ -381,7 +499,7 @@ model OccupancyRecord {
   monthlyRent    Int       @map("monthly_rent") // paise — rent at time of this allocation
   startDate      DateTime  @map("start_date") @db.Date
   endDate        DateTime? @map("end_date") @db.Date
-  reason         String?   // "initial", "room_change", "bed_swap", "move_out"
+  reason         String? // "initial", "room_change", "bed_swap", "move_out"
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   // Relations
@@ -421,45 +539,45 @@ enum BillingType {
 }
 
 model BillingRecord {
-  id              String        @id @default(uuid()) @db.Uuid
-  organizationId  String        @map("organization_id") @db.Uuid
-  residentId      String        @map("resident_id") @db.Uuid
-  propertyId      String        @map("property_id") @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  residentId     String @map("resident_id") @db.Uuid
+  propertyId     String @map("property_id") @db.Uuid
 
-  type            BillingType
-  status          BillingStatus @default(ISSUED)
-  description     String?
+  type        BillingType
+  status      BillingStatus @default(ISSUED)
+  description String?
 
   // Amounts in paise
-  amount          Int           // Total billed amount
-  paidAmount      Int           @default(0) @map("paid_amount")
-  lateFeeAmount   Int           @default(0) @map("late_fee_amount")
+  amount        Int // Total billed amount
+  paidAmount    Int @default(0) @map("paid_amount")
+  lateFeeAmount Int @default(0) @map("late_fee_amount")
 
   // Billing period
-  billingMonth    Int?          @map("billing_month") // 1-12
-  billingYear     Int?          @map("billing_year")
-  dueDate         DateTime      @map("due_date") @db.Date
-  periodStart     DateTime?     @map("period_start") @db.Date
-  periodEnd       DateTime?     @map("period_end") @db.Date
+  billingMonth Int?      @map("billing_month") // 1-12
+  billingYear  Int?      @map("billing_year")
+  dueDate      DateTime  @map("due_date") @db.Date
+  periodStart  DateTime? @map("period_start") @db.Date
+  periodEnd    DateTime? @map("period_end") @db.Date
 
   // Idempotency: prevent duplicate billing for same resident+type+period
-  idempotencyKey  String?       @unique @map("idempotency_key")
+  idempotencyKey String? @unique @map("idempotency_key")
 
-  version         Int           @default(1) // Optimistic concurrency
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  version   Int      @default(1) // Optimistic concurrency
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   resident     Resident      @relation(fields: [residentId], references: [id])
   payments     Payment[]
   rentInvoices RentInvoice[]
 
+  // Prevent duplicate rent billing for same resident and month
+  @@unique([residentId, type, billingMonth, billingYear])
   @@index([organizationId])
   @@index([residentId])
   @@index([status])
   @@index([dueDate])
-  // Prevent duplicate rent billing for same resident and month
-  @@unique([residentId, type, billingMonth, billingYear])
   @@map("billing_records")
 }
 
@@ -485,31 +603,31 @@ enum PaymentMode {
 }
 
 model Payment {
-  id              String        @id @default(uuid()) @db.Uuid
-  organizationId  String        @map("organization_id") @db.Uuid
-  residentId      String        @map("resident_id") @db.Uuid
-  billingRecordId String?       @map("billing_record_id") @db.Uuid
+  id              String  @id @default(uuid()) @db.Uuid
+  organizationId  String  @map("organization_id") @db.Uuid
+  residentId      String  @map("resident_id") @db.Uuid
+  billingRecordId String? @map("billing_record_id") @db.Uuid
 
-  amount          Int           // paise
-  status          PaymentStatus @default(PENDING)
-  mode            PaymentMode
-  collectionDate  DateTime      @map("collection_date") @db.Date
-  reference       String?       // UPI ref, cheque number, etc.
-  notes           String?
-  proofUrl        String?       @map("proof_url")
+  amount         Int // paise
+  status         PaymentStatus @default(PENDING)
+  mode           PaymentMode
+  collectionDate DateTime      @map("collection_date") @db.Date
+  reference      String? // UPI ref, cheque number, etc.
+  notes          String?
+  proofUrl       String?       @map("proof_url")
 
   // Razorpay-specific
-  razorpayOrderId   String?     @unique @map("razorpay_order_id")
-  razorpayPaymentId String?     @unique @map("razorpay_payment_id")
-  razorpaySignature String?     @map("razorpay_signature")
+  razorpayOrderId   String? @unique @map("razorpay_order_id")
+  razorpayPaymentId String? @unique @map("razorpay_payment_id")
+  razorpaySignature String? @map("razorpay_signature")
 
   // Audit
-  recordedBy      String?       @map("recorded_by") @db.Uuid // User who recorded offline payment
-  idempotencyKey  String?       @unique @map("idempotency_key")
+  recordedBy     String? @map("recorded_by") @db.Uuid // User who recorded offline payment
+  idempotencyKey String? @unique @map("idempotency_key")
 
-  version         Int           @default(1)
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   resident      Resident       @relation(fields: [residentId], references: [id])
@@ -540,23 +658,23 @@ model ExpenseCategory {
 }
 
 model Expense {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  propertyId     String   @map("property_id") @db.Uuid
-  categoryId     String   @map("category_id") @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  propertyId     String @map("property_id") @db.Uuid
+  categoryId     String @map("category_id") @db.Uuid
 
-  amount         Int      // paise
-  expenseDate    DateTime @map("expense_date") @db.Date
-  paymentMode    PaymentMode @map("payment_mode")
-  paidBy         String?  @map("paid_by")
-  paidTo         String?  @map("paid_to")
-  description    String?
-  receiptUrl     String?  @map("receipt_url")
-  notes          String?
+  amount      Int // paise
+  expenseDate DateTime    @map("expense_date") @db.Date
+  paymentMode PaymentMode @map("payment_mode")
+  paidBy      String?     @map("paid_by")
+  paidTo      String?     @map("paid_to")
+  description String?
+  receiptUrl  String?     @map("receipt_url")
+  notes       String?
 
-  createdBy      String   @map("created_by") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   property Property        @relation(fields: [propertyId], references: [id])
@@ -607,29 +725,29 @@ model ComplaintCategory {
 }
 
 model Complaint {
-  id             String           @id @default(uuid()) @db.Uuid
-  organizationId String           @map("organization_id") @db.Uuid
-  propertyId     String           @map("property_id") @db.Uuid
-  categoryId     String           @map("category_id") @db.Uuid
-  roomId         String?          @map("room_id") @db.Uuid
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @map("organization_id") @db.Uuid
+  propertyId     String  @map("property_id") @db.Uuid
+  categoryId     String  @map("category_id") @db.Uuid
+  roomId         String? @map("room_id") @db.Uuid
 
-  description    String
-  location       String?          // For common area complaints
-  urgency        ComplaintUrgency @default(MEDIUM)
-  status         ComplaintStatus  @default(RECEIVED)
+  description String
+  location    String? // For common area complaints
+  urgency     ComplaintUrgency @default(MEDIUM)
+  status      ComplaintStatus  @default(RECEIVED)
 
-  assignedTo     String?          @map("assigned_to") @db.Uuid // Staff member
-  resolution     String?
-  resolvedAt     DateTime?        @map("resolved_at") @db.Timestamptz
+  assignedTo String?   @map("assigned_to") @db.Uuid // Staff member
+  resolution String?
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz
 
-  createdBy      String           @map("created_by") @db.Uuid
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  property Property          @relation(fields: [propertyId], references: [id])
-  category ComplaintCategory @relation(fields: [categoryId], references: [id])
-  room     Room?             @relation(fields: [roomId], references: [id])
+  property Property           @relation(fields: [propertyId], references: [id])
+  category ComplaintCategory  @relation(fields: [categoryId], references: [id])
+  room     Room?              @relation(fields: [roomId], references: [id])
   comments ComplaintComment[]
   history  ComplaintHistory[]
 
@@ -653,13 +771,13 @@ model ComplaintComment {
 }
 
 model ComplaintHistory {
-  id            String          @id @default(uuid()) @db.Uuid
-  complaintId   String          @map("complaint_id") @db.Uuid
-  fromStatus    ComplaintStatus @map("from_status")
-  toStatus      ComplaintStatus @map("to_status")
-  changedBy     String          @map("changed_by") @db.Uuid
-  notes         String?
-  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  id          String          @id @default(uuid()) @db.Uuid
+  complaintId String          @map("complaint_id") @db.Uuid
+  fromStatus  ComplaintStatus @map("from_status")
+  toStatus    ComplaintStatus @map("to_status")
+  changedBy   String          @map("changed_by") @db.Uuid
+  notes       String?
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz
 
   complaint Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
 
@@ -694,24 +812,24 @@ model StaffDesignation {
 }
 
 model Staff {
-  id             String      @id @default(uuid()) @db.Uuid
-  organizationId String      @map("organization_id") @db.Uuid
-  propertyId     String      @map("property_id") @db.Uuid
-  designationId  String      @map("designation_id") @db.Uuid
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  propertyId     String @map("property_id") @db.Uuid
+  designationId  String @map("designation_id") @db.Uuid
 
-  firstName      String      @map("first_name")
-  lastName       String?     @map("last_name")
-  mobile         String
-  email          String?
-  status         StaffStatus @default(ACTIVE)
+  firstName String      @map("first_name")
+  lastName  String?     @map("last_name")
+  mobile    String
+  email     String?
+  status    StaffStatus @default(ACTIVE)
 
-  salary         Int?        // paise — monthly salary; null if not applicable
-  joiningDate    DateTime?   @map("joining_date") @db.Date
-  exitDate       DateTime?   @map("exit_date") @db.Date
-  notes          String?
+  salary      Int? // paise — monthly salary; null if not applicable
+  joiningDate DateTime? @map("joining_date") @db.Date
+  exitDate    DateTime? @map("exit_date") @db.Date
+  notes       String?
 
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
   property    Property         @relation(fields: [propertyId], references: [id])
@@ -772,10 +890,10 @@ model AuditLog {
   id             String   @id @default(uuid()) @db.Uuid
   organizationId String?  @map("organization_id") @db.Uuid
   userId         String?  @map("user_id") @db.Uuid
-  action         String   // e.g. "user.login", "resident.create", "payment.record"
+  action         String // e.g. "user.login", "resident.create", "payment.record"
   entityType     String?  @map("entity_type")
   entityId       String?  @map("entity_id")
-  metadata       Json?    // Additional context — never sensitive data
+  metadata       Json? // Additional context — never sensitive data
   ipAddress      String?  @map("ip_address") @db.Inet
   userAgent      String?  @map("user_agent")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
@@ -814,10 +932,10 @@ model Lead {
   name              String
   mobile            String
   email             String?
-  budget            Int?       // paise
+  budget            Int? // paise
   sharingPreference String?    @map("sharing_preference")
   status            LeadStatus @default(NEW)
-  source            String?    // "website", "referral", "walk_in", "listing"
+  source            String? // "website", "referral", "walk_in", "listing"
   notes             String?
   visitScheduledAt  DateTime?  @map("visit_scheduled_at") @db.Timestamptz
   createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz
@@ -1023,9 +1141,9 @@ model LandlordPayoutAccount {
   updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  property     Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property     Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   mandates     TenantMandate[]
 
   @@index([organizationId])
@@ -1095,7 +1213,7 @@ model RentInvoice {
   invoiceNumber      String             @unique @map("invoice_number")
   billingMonth       Int                @map("billing_month") // 1-12
   billingYear        Int                @map("billing_year")
-  amount             Int                // Total rent in paise
+  amount             Int // Total rent in paise
   platformFee        Int                @default(3000) @map("platform_fee") // Platform cut in paise (e.g. ₹30 = 3000 paise)
   transferAmount     Int                @map("transfer_amount") // Landlord payout in paise (amount - platformFee)
   status             RentInvoiceStatus  @default(PENDING)

@@ -26,6 +26,12 @@ export class RequireOrgGuard implements CanActivate {
       );
     }
 
+    if (!user.organizationAccessActive) {
+      throw new ForbiddenException(
+        'Organization access is inactive or has been revoked',
+      );
+    }
+
     return true;
   }
 }

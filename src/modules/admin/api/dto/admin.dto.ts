@@ -1,0 +1,290 @@
+import {
+  AdminCasePriority,
+  AdminCaseStatus,
+  AdminCaseType,
+  BedStatus,
+  KycStatus,
+  PlatformAdminStatus,
+  PlatformRole,
+  PropertyStatus,
+  RoomStatus,
+} from '@prisma/client';
+import { z } from 'zod';
+import { PLATFORM_PERMISSIONS } from '../../domain/admin-permissions.js';
+
+const page = z.coerce.number().int().min(1).default(1);
+const limit = z.coerce.number().int().min(1).max(100).default(20);
+const search = z.string().trim().max(200).optional();
+const uuid = z.string().uuid();
+const reason = z.string().trim().min(5).max(1000);
+
+const optionalBoolean = z.preprocess((value) => {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}, z.boolean().optional());
+
+export const adminDashboardQuerySchema = z
+  .object({
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+    organizationId: uuid.optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.from && value.to && value.from > value.to) {
+      context.addIssue({
+        code: 'custom',
+        message: 'from must be before or equal to to',
+        path: ['from'],
+      });
+    }
+  });
+export type AdminDashboardQueryDto = z.infer<typeof adminDashboardQuerySchema>;
+
+export const adminListQuerySchema = z.object({ page, limit, search });
+export type AdminListQueryDto = z.infer<typeof adminListQuerySchema>;
+
+export const adminUsersQuerySchema = adminListQuerySchema.extend({
+  isActive: optionalBoolean,
+  organizationId: uuid.optional(),
+});
+export type AdminUsersQueryDto = z.infer<typeof adminUsersQuerySchema>;
+
+export const adminOrganizationsQuerySchema = adminListQuerySchema.extend({
+  isActive: optionalBoolean,
+});
+export type AdminOrganizationsQueryDto = z.infer<
+  typeof adminOrganizationsQuerySchema
+>;
+
+export const adminPropertiesQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  status: z.nativeEnum(PropertyStatus).optional(),
+});
+export type AdminPropertiesQueryDto = z.infer<
+  typeof adminPropertiesQuerySchema
+>;
+
+export const adminInventoryQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  propertyId: uuid.optional(),
+  roomStatus: z.nativeEnum(RoomStatus).optional(),
+  bedStatus: z.nativeEnum(BedStatus).optional(),
+});
+export type AdminInventoryQueryDto = z.infer<typeof adminInventoryQuerySchema>;
+
+export const adminResidentsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  propertyId: uuid.optional(),
+  status: z
+    .enum([
+      'PENDING_MOVE_IN',
+      'ACTIVE',
+      'NOTICE_PERIOD',
+      'MOVED_OUT',
+      'ARCHIVED',
+    ])
+    .optional(),
+});
+export type AdminResidentsQueryDto = z.infer<typeof adminResidentsQuerySchema>;
+
+export const adminBookingsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  propertyId: uuid.optional(),
+  status: z
+    .enum(['CONFIRMED', 'CHECKED_IN', 'CANCELLED', 'EXPIRED'])
+    .optional(),
+});
+export type AdminBookingsQueryDto = z.infer<typeof adminBookingsQuerySchema>;
+
+export const adminComplaintsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  propertyId: uuid.optional(),
+  status: z
+    .enum([
+      'RECEIVED',
+      'VERIFIED',
+      'NEED_MORE_TIME',
+      'TEAM_WORKING',
+      'PENDING',
+      'RESOLVED',
+    ])
+    .optional(),
+  urgency: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+});
+export type AdminComplaintsQueryDto = z.infer<
+  typeof adminComplaintsQuerySchema
+>;
+
+export const adminAnnouncementsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  propertyId: uuid.optional(),
+  status: z
+    .enum(['DRAFT', 'SCHEDULED', 'SENDING', 'SENT', 'FAILED'])
+    .optional(),
+});
+export type AdminAnnouncementsQueryDto = z.infer<
+  typeof adminAnnouncementsQuerySchema
+>;
+
+export const adminPaymentsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  status: z
+    .enum(['PENDING', 'CONFIRMED', 'FAILED', 'REFUNDED', 'DISPUTED'])
+    .optional(),
+  mode: z
+    .enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'RAZORPAY', 'OTHER'])
+    .optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type AdminPaymentsQueryDto = z.infer<typeof adminPaymentsQuerySchema>;
+
+export const adminPayoutsQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED']).optional(),
+  kycStatus: z.nativeEnum(KycStatus).optional(),
+});
+export type AdminPayoutsQueryDto = z.infer<typeof adminPayoutsQuerySchema>;
+
+export const adminPendingQuerySchema = z.object({
+  organizationId: uuid.optional(),
+});
+export type AdminPendingQueryDto = z.infer<typeof adminPendingQuerySchema>;
+
+export const adminAuditQuerySchema = adminListQuerySchema.extend({
+  organizationId: uuid.optional(),
+  userId: uuid.optional(),
+  action: z.string().trim().max(200).optional(),
+  entityType: z.string().trim().max(100).optional(),
+  entityId: z.string().trim().max(100).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+export type AdminAuditQueryDto = z.infer<typeof adminAuditQuerySchema>;
+
+export const adminCasesQuerySchema = adminListQuerySchema.extend({
+  type: z.nativeEnum(AdminCaseType).optional(),
+  status: z.nativeEnum(AdminCaseStatus).optional(),
+  priority: z.nativeEnum(AdminCasePriority).optional(),
+  organizationId: uuid.optional(),
+  assignedToUserId: uuid.optional(),
+});
+export type AdminCasesQueryDto = z.infer<typeof adminCasesQuerySchema>;
+
+export const createPlatformAdminSchema = z.object({
+  email: z.string().email().toLowerCase().trim(),
+  role: z.nativeEnum(PlatformRole),
+  permissionOverrides: z
+    .array(z.enum(PLATFORM_PERMISSIONS))
+    .max(30)
+    .default([]),
+});
+export type CreatePlatformAdminDto = z.infer<typeof createPlatformAdminSchema>;
+
+export const updatePlatformAdminSchema = z
+  .object({
+    role: z.nativeEnum(PlatformRole).optional(),
+    status: z.nativeEnum(PlatformAdminStatus).optional(),
+    permissionOverrides: z
+      .array(z.enum(PLATFORM_PERMISSIONS))
+      .max(30)
+      .optional(),
+    reason,
+  })
+  .refine(
+    (value) =>
+      value.role !== undefined ||
+      value.status !== undefined ||
+      value.permissionOverrides !== undefined,
+    'At least one admin field must be changed',
+  );
+export type UpdatePlatformAdminDto = z.infer<typeof updatePlatformAdminSchema>;
+
+export const updateUserStatusSchema = z.object({
+  isActive: z.boolean(),
+  reason,
+});
+export type UpdateUserStatusDto = z.infer<typeof updateUserStatusSchema>;
+
+export const updateOrganizationStatusSchema = z.object({
+  isActive: z.boolean(),
+  reason,
+});
+export type UpdateOrganizationStatusDto = z.infer<
+  typeof updateOrganizationStatusSchema
+>;
+
+export const updatePropertyStatusSchema = z.object({
+  status: z.nativeEnum(PropertyStatus),
+  reason,
+});
+export type UpdatePropertyStatusDto = z.infer<
+  typeof updatePropertyStatusSchema
+>;
+
+export const updateRoomStatusSchema = z.object({
+  status: z.nativeEnum(RoomStatus),
+  reason,
+});
+export type UpdateRoomStatusDto = z.infer<typeof updateRoomStatusSchema>;
+
+export const updateBedStatusSchema = z.object({
+  status: z.nativeEnum(BedStatus),
+  reason,
+});
+export type UpdateBedStatusDto = z.infer<typeof updateBedStatusSchema>;
+
+export const reviewPayoutSchema = z
+  .object({
+    kycStatus: z.nativeEnum(KycStatus),
+    status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED']).optional(),
+    reason,
+  })
+  .superRefine((value, context) => {
+    if (value.kycStatus === 'VERIFIED' && value.status === 'REJECTED') {
+      context.addIssue({
+        code: 'custom',
+        message: 'A verified payout account cannot be rejected',
+        path: ['status'],
+      });
+    }
+  });
+export type ReviewPayoutDto = z.infer<typeof reviewPayoutSchema>;
+
+export const createAdminCaseSchema = z.object({
+  type: z.nativeEnum(AdminCaseType),
+  priority: z.nativeEnum(AdminCasePriority).default('MEDIUM'),
+  title: z.string().trim().min(3).max(200),
+  description: z.string().trim().max(5000).optional(),
+  organizationId: uuid.optional(),
+  targetType: z.string().trim().min(2).max(100).optional(),
+  targetId: z.string().trim().min(1).max(100).optional(),
+  assignedToUserId: uuid.optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+  idempotencyKey: z.string().trim().min(8).max(200).optional(),
+  dueAt: z.coerce.date().optional(),
+});
+export type CreateAdminCaseDto = z.infer<typeof createAdminCaseSchema>;
+
+export const updateAdminCaseSchema = z.object({
+  status: z.nativeEnum(AdminCaseStatus).optional(),
+  priority: z.nativeEnum(AdminCasePriority).optional(),
+  assignedToUserId: uuid.nullable().optional(),
+  resolution: z.string().trim().min(5).max(5000).optional(),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+  dueAt: z.coerce.date().nullable().optional(),
+  reason,
+});
+export type UpdateAdminCaseDto = z.infer<typeof updateAdminCaseSchema>;
+
+export const upsertPlatformSettingSchema = z.object({
+  value: z.unknown(),
+  description: z.string().trim().max(1000).optional(),
+  isPublic: z.boolean().default(false),
+  expectedVersion: z.number().int().positive().optional(),
+  reason,
+});
+export type UpsertPlatformSettingDto = z.infer<
+  typeof upsertPlatformSettingSchema
+>;

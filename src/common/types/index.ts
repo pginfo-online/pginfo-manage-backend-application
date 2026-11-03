@@ -34,6 +34,15 @@ export interface AuthenticatedUser {
   email: string;
   organizationId: string | null;
   organizationRole: string | null;
+  /** True only when the current DB membership and organization are active. */
+  organizationAccessActive: boolean;
+  /** Live platform-admin state loaded during JWT validation, never from JWT claims. */
+  platformAdmin?: {
+    id: string;
+    role: string;
+    status: string;
+    permissionOverrides: string[];
+  };
 }
 
 /**

@@ -9,6 +9,7 @@
 PgInfo is built as a **Modular Monolith** in TypeScript using **NestJS**, **Prisma ORM**, **PostgreSQL** (hosted on Supabase or self-hosted), and **Redis** (caching and BullMQ background workers).
 
 ### Architectural Foundations
+
 - **Modular Monolith**: Clean domain boundaries under `src/modules/` separating Identity, Organizations, Property Operations, Occupancy, Finance, Expenses, Maintenance, Staff, Communications, and Reporting.
 - **Independent Workloads**: Single codebase deployed as two horizontally scalable runtime workloads:
   1. `HTTP API Application` (`node dist/main.js` on port 3000)
@@ -22,26 +23,26 @@ PgInfo is built as a **Modular Monolith** in TypeScript using **NestJS**, **Pris
 
 ## 2. Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Runtime | Node.js 22 LTS |
-| Language | TypeScript 6 (strict mode enabled) |
-| Framework | NestJS 12 |
-| API Architecture | REST API under `/api/v1` |
-| API Documentation | OpenAPI 3.0 / Swagger UI at `/api/docs` |
-| Primary Database | PostgreSQL 16 (hosted on Supabase or Docker) |
-| ORM | Prisma ORM 6 |
-| Validation | Zod via centralized NestJS `ZodValidationPipe` |
-| Caching | Redis 7 via `ioredis` |
-| Background Queues | BullMQ 5 backed by Redis |
-| Payment Gateway | Razorpay (Server orders, HMAC SHA-256 verification, Webhooks) |
-| Object Storage | Cloudinary (abstracted via `StorageService` interface) |
-| Email Service | Resend API (abstracted via `EmailAdapter` interface) |
-| WhatsApp Service | Meta Cloud API / Provider HTTP adapter |
-| Structured Logging | Pino with request correlation IDs (`X-Trace-Id`) |
-| Testing | Vitest 4, Supertest |
-| Load Testing | k6 |
-| Package Manager | pnpm (with frozen lockfile) |
+| Layer              | Technology                                                    |
+| ------------------ | ------------------------------------------------------------- |
+| Runtime            | Node.js 22 LTS                                                |
+| Language           | TypeScript 6 (strict mode enabled)                            |
+| Framework          | NestJS 12                                                     |
+| API Architecture   | REST API under `/api/v1`                                      |
+| API Documentation  | OpenAPI 3.0 / Swagger UI at `/api/docs`                       |
+| Primary Database   | PostgreSQL 16 (hosted on Supabase or Docker)                  |
+| ORM                | Prisma ORM 6                                                  |
+| Validation         | Zod via centralized NestJS `ZodValidationPipe`                |
+| Caching            | Redis 7 via `ioredis`                                         |
+| Background Queues  | BullMQ 5 backed by Redis                                      |
+| Payment Gateway    | Razorpay (Server orders, HMAC SHA-256 verification, Webhooks) |
+| Object Storage     | Cloudinary (abstracted via `StorageService` interface)        |
+| Email Service      | Resend API (abstracted via `EmailAdapter` interface)          |
+| WhatsApp Service   | Meta Cloud API / Provider HTTP adapter                        |
+| Structured Logging | Pino with request correlation IDs (`X-Trace-Id`)              |
+| Testing            | Vitest 4, Supertest                                           |
+| Load Testing       | k6                                                            |
+| Package Manager    | pnpm (with frozen lockfile)                                   |
 
 ---
 
@@ -106,6 +107,7 @@ backend/
 ## 4. Getting Started
 
 ### Prerequisites
+
 - Node.js >= 22.0.0
 - pnpm >= 9.0.0 (`npm install -g pnpm`)
 - Docker & Docker Compose (or access to PostgreSQL and Redis)
@@ -113,29 +115,36 @@ backend/
 ### Local Development Setup
 
 1. **Clone and install dependencies**:
+
    ```bash
    pnpm install
    ```
 
 2. **Start Infrastructure Services**:
+
    ```bash
    docker compose up -d
    ```
-   *Starts PostgreSQL 16 on port 5432 and Redis 7 on port 6379 with healthchecks.*
+
+   _Starts PostgreSQL 16 on port 5432 and Redis 7 on port 6379 with healthchecks._
 
 3. **Configure Environment Variables**:
+
    ```bash
    cp .env.example .env
    ```
+
    Update `.env` with your database credentials (e.g., Supabase connection string) and secrets.
 
 4. **Initialize Database Schema & Client**:
+
    ```bash
    pnpm prisma:generate
    pnpm prisma:migrate:dev
    ```
 
 5. **Start HTTP API**:
+
    ```bash
    pnpm start:dev
    ```
@@ -176,6 +185,7 @@ pnpm build
 ```
 
 ### Specialized Test Suites
+
 - **Tenant Isolation Security Tests** (`test/security/tenant-isolation.spec.ts`): Verifies that user principals in Organization A receive 404/Forbidden when attempting to query or mutate resources belonging to Organization B (IDOR prevention).
 - **Concurrency & Race Condition Defenses** (`test/concurrency/concurrent-operations.spec.ts`): Tests simultaneous bed allocation races (first succeeds, second is rejected with 409 Conflict) and concurrent billing runs (guarantees zero duplicate bills via `P2002` handling).
 
@@ -190,12 +200,17 @@ k6 run scripts/k6/load-test.js
 ```
 
 SLA Thresholds:
+
 - `http_req_duration`: 95th percentile < 200ms, 99th percentile < 500ms
 - `http_req_failed`: Error rate < 1.0%
 
 ---
 
 ## 7. Operational Runbooks
+
+The platform-wide administration API, RBAC model, bootstrap procedure, endpoint
+inventory, and safety invariants are documented in
+[`docs/admin-module.md`](docs/admin-module.md).
 
 - [ADR-001: Modular Monolith Architecture](docs/adr/001-modular-monolith.md)
 - [ADR-002: Multi-Tenant Data Isolation Strategy](docs/adr/002-multi-tenant-isolation.md)
