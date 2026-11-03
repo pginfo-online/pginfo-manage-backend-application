@@ -54,7 +54,7 @@ describe('organization-scoped storage', () => {
     } as unknown as StorageService);
     await controller.upload(
       {
-        buffer: Buffer.from('image'),
+        buffer: Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x01]),
         mimetype: 'image/jpeg',
         originalname: '../unsafe proof.jpg',
         size: 5,

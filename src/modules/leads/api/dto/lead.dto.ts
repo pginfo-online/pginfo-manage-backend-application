@@ -54,3 +54,8 @@ export const queryLeadsSchema = z.object({
 });
 
 export type QueryLeadsDto = z.infer<typeof queryLeadsSchema>;
+
+export const leadStatsQuerySchema = z.object({
+  propertyId: z.string().uuid().optional(),
+});
+export type LeadStatsQueryDto = z.infer<typeof leadStatsQuerySchema>;

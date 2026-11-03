@@ -36,7 +36,13 @@ export class HealthController {
   @ApiOperation({ summary: 'Readiness check' })
   readiness(): Promise<HealthCheckResult> {
     return this.health.check([
-      () => this.prismaHealth.pingCheck('database', this.prisma),
+      // Hosted PostgreSQL can incur TLS/pool cold-start latency. Keep the
+      // readiness budget bounded without ejecting a healthy instance on the
+      // indicator's overly aggressive one-second default.
+      () =>
+        this.prismaHealth.pingCheck('database', this.prisma, {
+          timeout: 5_000,
+        }),
     ]);
   }
 }

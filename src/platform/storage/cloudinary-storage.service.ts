@@ -71,12 +71,15 @@ export class CloudinaryStorageService implements StorageService {
 
   async delete(publicId: string): Promise<void> {
     this.assertConfigured();
-    const result = await cloudinary.uploader.destroy(publicId, {
-      invalidate: true,
-      resource_type: 'image',
-    });
-    if (result.result !== 'ok' && result.result !== 'not found') {
-      throw new InternalServerErrorException('File deletion failed');
+    for (const resourceType of ['image', 'raw', 'video'] as const) {
+      const result = await cloudinary.uploader.destroy(publicId, {
+        invalidate: true,
+        resource_type: resourceType,
+      });
+      if (result.result === 'ok') return;
+      if (result.result !== 'not found') {
+        throw new InternalServerErrorException('File deletion failed');
+      }
     }
   }
 

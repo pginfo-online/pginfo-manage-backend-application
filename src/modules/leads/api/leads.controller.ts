@@ -26,6 +26,8 @@ import {
   type CreateLeadDto,
   type UpdateLeadDto,
   type QueryLeadsDto,
+  leadStatsQuerySchema,
+  type LeadStatsQueryDto,
 } from './dto/lead.dto.js';
 import { ZodValidationPipe } from '../../../common/validation/index.js';
 import {
@@ -65,6 +67,16 @@ export class LeadsController {
     @CurrentOrgId() orgId: string,
   ) {
     return this.leadsService.findAll(orgId, query);
+  }
+
+  @Get('stats')
+  @ApiOperation({ summary: 'Get lead pipeline statistics' })
+  async stats(
+    @Query(new ZodValidationPipe(leadStatsQuerySchema))
+    query: LeadStatsQueryDto,
+    @CurrentOrgId() orgId: string,
+  ) {
+    return this.leadsService.stats(orgId, query.propertyId);
   }
 
   @Get(':id')

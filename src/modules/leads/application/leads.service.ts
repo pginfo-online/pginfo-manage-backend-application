@@ -88,6 +88,29 @@ export class LeadsService {
     return lead;
   }
 
+  async stats(orgId: string, propertyId?: string) {
+    const groups = await this.prisma.lead.groupBy({
+      by: ['status'],
+      where: { organizationId: orgId, ...(propertyId ? { propertyId } : {}) },
+      _count: true,
+    });
+    const byStatus = Object.fromEntries(
+      groups.map((group) => [group.status, group._count]),
+    );
+    return {
+      total: groups.reduce((sum, group) => sum + group._count, 0),
+      byStatus,
+      conversionRate:
+        groups.length === 0
+          ? 0
+          : Math.round(
+              ((byStatus['CONVERTED'] ?? 0) /
+                groups.reduce((sum, group) => sum + group._count, 0)) *
+                100,
+            ),
+    };
+  }
+
   async update(id: string, dto: UpdateLeadDto, orgId: string) {
     await this.findById(id, orgId);
 
