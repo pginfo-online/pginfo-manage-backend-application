@@ -116,7 +116,10 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     mockRazorpayAdapter.verifyWebhookSignature.mockReturnValue(false);
 
     await expect(
-      service.handleWebhook(JSON.stringify({ event: 'subscription.charged' }), 'invalid_sig'),
+      service.handleWebhook(
+        JSON.stringify({ event: 'subscription.charged' }),
+        'invalid_sig',
+      ),
     ).rejects.toThrow('Invalid webhook signature');
   });
 
@@ -210,7 +213,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         create: expect.objectContaining({
           status: 'PAID',
           amount: 2500000,
-          platformFee: 3000,       // ₹30 retained
+          platformFee: 3000, // ₹30 retained
           transferAmount: 2497000, // ₹24,970 transferred
           collectionType: 'AUTOPAY',
           razorpayPaymentId: 'pay_charged_555',
@@ -219,12 +222,15 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     );
 
     // Verify Razorpay Route transfer
-    expect(mockRazorpayAdapter.transferPayment).toHaveBeenCalledWith('pay_charged_555', {
-      account: landlordAccountId,
-      amount: 2497000, // exact split
-      currency: 'INR',
-      notes: expect.any(Object),
-    });
+    expect(mockRazorpayAdapter.transferPayment).toHaveBeenCalledWith(
+      'pay_charged_555',
+      {
+        account: landlordAccountId,
+        amount: 2497000, // exact split
+        currency: 'INR',
+        notes: expect.any(Object),
+      },
+    );
 
     // Verify notification sent
     expect(mockWhatsAppAdapter.send).toHaveBeenCalled();

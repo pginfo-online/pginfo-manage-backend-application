@@ -38,6 +38,7 @@ export const queryExpensesSchema = z.object({
   propertyId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   paymentMode: z.nativeEnum(PaymentMode).optional(),
+  search: z.string().trim().max(100).optional(),
   startDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)

@@ -52,8 +52,14 @@ export class PayoutsController {
     status: 201,
     description: 'Owner successfully onboarded to Razorpay Route',
   })
-  @ApiResponse({ status: 400, description: 'Invalid KYC or bank account details' })
-  @ApiResponse({ status: 409, description: 'Owner payout account already exists' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid KYC or bank account details',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Owner payout account already exists',
+  })
   async onboardOwner(
     @Body(new ZodValidationPipe(onboardOwnerSchema)) dto: OnboardOwnerDto,
     @CurrentOrgId() orgId: string,
@@ -65,7 +71,9 @@ export class PayoutsController {
   @Get('accounts')
   @HttpCode(HttpStatus.OK)
   @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
-  @ApiOperation({ summary: 'List landlord payout accounts for this organization' })
+  @ApiOperation({
+    summary: 'List landlord payout accounts for this organization',
+  })
   async listAccounts(
     @Query(new ZodValidationPipe(queryPayoutAccountsSchema))
     query: QueryPayoutAccountsDto,

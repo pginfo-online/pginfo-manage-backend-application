@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { MandateStatus, MandateChannel, MandateCollectionMode } from '@prisma/client';
+import {
+  MandateStatus,
+  MandateChannel,
+  MandateCollectionMode,
+} from '@prisma/client';
 
 export const createMandateSchema = z
   .object({

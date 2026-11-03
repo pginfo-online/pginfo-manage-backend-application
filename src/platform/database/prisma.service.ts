@@ -19,6 +19,10 @@ export class PrismaService
 
   constructor() {
     super({
+      transactionOptions: {
+        maxWait: 10_000,
+        timeout: 30_000,
+      },
       log: [
         { emit: 'event', level: 'query' },
         { emit: 'event', level: 'error' },

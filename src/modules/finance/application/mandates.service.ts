@@ -93,7 +93,8 @@ export class MandatesService {
       name: planName,
       amountPaise: dto.rentAmount,
       currency: 'INR',
-      description: `Monthly rent collection mandate for ${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
+      description:
+        `Monthly rent collection mandate for ${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
       notes: {
         tenantId: tenant.id,
         propertyId: tenant.propertyId,
@@ -294,7 +295,9 @@ export class MandatesService {
         take: query.limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          tenant: { select: { id: true, firstName: true, lastName: true, mobile: true } },
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, mobile: true },
+          },
           property: { select: { id: true, name: true } },
           unit: { select: { id: true, roomNumber: true } },
         },

@@ -17,6 +17,11 @@ describe('Concurrency & Race Condition Defenses', () => {
       bed: {
         findFirst: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn(),
+        groupBy: vi.fn().mockResolvedValue([
+          { status: 'OCCUPIED', _count: 1 },
+          { status: 'AVAILABLE', _count: 1 },
+        ]),
         findMany: vi.fn().mockResolvedValue([]),
       },
       room: {
@@ -48,25 +53,16 @@ describe('Concurrency & Race Condition Defenses', () => {
   });
 
   it('Concurrent Bed Allocation: Prevents double allocation of the same bed', async () => {
-    let bedOccupied = false;
-
-    // Simulate database returning bed with active resident on second check
-    mockPrisma.bed.findFirst.mockImplementation(() => {
-      if (bedOccupied) {
-        return Promise.resolve({
-          id: 'bed-1',
-          bedNumber: 'A',
-          residents: [
-            { id: 'res-winner', firstName: 'FirstResident', status: 'ACTIVE' },
-          ],
-        });
-      }
-      bedOccupied = true;
-      return Promise.resolve({
-        id: 'bed-1',
-        bedNumber: 'A',
-        residents: [],
-      });
+    mockPrisma.bed.findFirst.mockResolvedValue({
+      id: 'bed-1',
+      bedNumber: 'A',
+      residents: [],
+    });
+    let claimed = false;
+    mockPrisma.bed.updateMany.mockImplementation(() => {
+      if (claimed) return Promise.resolve({ count: 0 });
+      claimed = true;
+      return Promise.resolve({ count: 1 });
     });
 
     const candidate1 = residentsService.create(

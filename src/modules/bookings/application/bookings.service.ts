@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
-import type { CreateBookingDto, QueryBookingsDto } from '../api/dto/booking.dto.js';
+import type {
+  CreateBookingDto,
+  QueryBookingsDto,
+} from '../api/dto/booking.dto.js';
 import { Prisma } from '@prisma/client';
 
 @Injectable()
@@ -30,7 +33,9 @@ export class BookingsService {
       }
 
       if (bed.status !== 'AVAILABLE') {
-        throw new ConflictError(`Bed ${bed.bedNumber} is not available for booking`);
+        throw new ConflictError(
+          `Bed ${bed.bedNumber} is not available for booking`,
+        );
       }
     }
 
@@ -64,7 +69,9 @@ export class BookingsService {
       return created;
     });
 
-    this.logger.log(`Created booking ${booking.id} for guest ${booking.guestName}`);
+    this.logger.log(
+      `Created booking ${booking.id} for guest ${booking.guestName}`,
+    );
     return booking;
   }
 

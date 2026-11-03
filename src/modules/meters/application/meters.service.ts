@@ -95,7 +95,12 @@ export class MetersService {
     return meter;
   }
 
-  async recordReading(id: string, dto: RecordReadingDto, orgId: string, userId?: string) {
+  async recordReading(
+    id: string,
+    dto: RecordReadingDto,
+    orgId: string,
+    userId?: string,
+  ) {
     const meter = await this.prisma.subMeter.findFirst({
       where: { id, organizationId: orgId },
     });
@@ -114,7 +119,9 @@ export class MetersService {
     const unitsConsumed = dto.reading - currentReadingVal;
     const totalAmount = Math.round(unitsConsumed * meter.tariffRate);
 
-    const readingDate = dto.readingDate ? new Date(dto.readingDate) : new Date();
+    const readingDate = dto.readingDate
+      ? new Date(dto.readingDate)
+      : new Date();
 
     return this.prisma.$transaction(async (tx) => {
       const reading = await tx.meterReading.create({

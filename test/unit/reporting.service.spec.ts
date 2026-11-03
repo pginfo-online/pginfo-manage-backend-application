@@ -9,6 +9,9 @@ describe('DashboardService & ExportService', () => {
 
   beforeEach(() => {
     mockPrisma = {
+      $transaction: vi.fn((operations: Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
       property: {
         count: vi.fn().mockResolvedValue(2),
       },

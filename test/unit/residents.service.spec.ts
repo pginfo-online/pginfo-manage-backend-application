@@ -14,6 +14,7 @@ describe('ResidentsService', () => {
       bed: {
         findFirst: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         groupBy: vi.fn().mockResolvedValue([]),
         findMany: vi.fn().mockResolvedValue([]),
       },

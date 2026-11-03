@@ -13,10 +13,16 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
   beforeEach(() => {
     mockPrisma = {
       organization: {
-        findUnique: vi.fn().mockResolvedValue({ id: orgId, name: 'Acme Properties' }),
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ id: orgId, name: 'Acme Properties' }),
       },
       property: {
-        findFirst: vi.fn().mockResolvedValue({ id: propertyId, organizationId: orgId, name: 'Sunrise PG' }),
+        findFirst: vi.fn().mockResolvedValue({
+          id: propertyId,
+          organizationId: orgId,
+          name: 'Sunrise PG',
+        }),
       },
       landlordPayoutAccount: {
         findFirst: vi.fn(),
@@ -42,10 +48,12 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
 
   it('should successfully onboard a landlord and create Razorpay Route sub-merchant account', async () => {
     mockPrisma.landlordPayoutAccount.findFirst.mockResolvedValue(null);
-    mockPrisma.landlordPayoutAccount.create.mockImplementation(({ data }: any) => ({
-      id: 'payout-acc-1',
-      ...data,
-    }));
+    mockPrisma.landlordPayoutAccount.create.mockImplementation(
+      ({ data }: any) => ({
+        id: 'payout-acc-1',
+        ...data,
+      }),
+    );
 
     const result = await service.onboardOwner(
       {

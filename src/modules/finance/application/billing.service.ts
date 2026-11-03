@@ -201,6 +201,17 @@ export class BillingService {
       ...(query.status ? { status: query.status } : {}),
       ...(query.month ? { billingMonth: query.month } : {}),
       ...(query.year ? { billingYear: query.year } : {}),
+      ...(query.search
+        ? {
+            resident: {
+              OR: [
+                { firstName: { contains: query.search, mode: 'insensitive' } },
+                { lastName: { contains: query.search, mode: 'insensitive' } },
+                { mobile: { contains: query.search } },
+              ],
+            },
+          }
+        : {}),
     };
 
     const [total, records] = await Promise.all([

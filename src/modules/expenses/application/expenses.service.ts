@@ -85,6 +85,20 @@ export class ExpensesService {
       ...(query.propertyId ? { propertyId: query.propertyId } : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.paymentMode ? { paymentMode: query.paymentMode } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { description: { contains: query.search, mode: 'insensitive' } },
+              { paidBy: { contains: query.search, mode: 'insensitive' } },
+              { paidTo: { contains: query.search, mode: 'insensitive' } },
+              {
+                category: {
+                  name: { contains: query.search, mode: 'insensitive' },
+                },
+              },
+            ],
+          }
+        : {}),
       ...(query.startDate || query.endDate
         ? {
             expenseDate: {

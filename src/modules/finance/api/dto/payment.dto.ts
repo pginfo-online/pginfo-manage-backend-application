@@ -46,6 +46,7 @@ export const queryPaymentsSchema = z.object({
   propertyId: z.string().uuid().optional(),
   status: z.nativeEnum(PaymentStatus).optional(),
   mode: z.nativeEnum(PaymentMode).optional(),
+  search: z.string().trim().max(100).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });

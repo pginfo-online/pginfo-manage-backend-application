@@ -8,7 +8,10 @@ export const createBookingSchema = z.object({
   guestName: z.string().min(2, 'Guest name is required').trim(),
   guestMobile: z
     .string()
-    .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
+    .regex(
+      /^[6-9]\d{9}$/,
+      'Please enter a valid 10-digit Indian mobile number',
+    ),
   guestEmail: z.string().email().optional(),
   tokenAmount: z.coerce.number().int().min(0).default(0), // paise
   expectedMoveIn: z

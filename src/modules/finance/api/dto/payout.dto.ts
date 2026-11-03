@@ -18,7 +18,13 @@ export const onboardOwnerSchema = z.object({
     .min(2, 'Business name must be at least 2 characters')
     .max(120),
   businessType: z
-    .enum(['individual', 'proprietorship', 'partnership', 'llp', 'private_limited'])
+    .enum([
+      'individual',
+      'proprietorship',
+      'partnership',
+      'llp',
+      'private_limited',
+    ])
     .default('individual'),
   accountNumber: z
     .string()
@@ -29,6 +35,12 @@ export const onboardOwnerSchema = z.object({
     .trim()
     .toUpperCase()
     .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code (e.g. HDFC0001234)'),
+  panNumber: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN number')
+    .optional(),
   propertyId: z.string().uuid().optional(),
 });
 

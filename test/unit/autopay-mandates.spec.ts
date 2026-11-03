@@ -58,7 +58,9 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
         totalCount: 11,
         paidCount: 0,
       }),
-      cancelSubscription: vi.fn().mockResolvedValue({ id: 'sub_rent_456', status: 'cancelled' }),
+      cancelSubscription: vi
+        .fn()
+        .mockResolvedValue({ id: 'sub_rent_456', status: 'cancelled' }),
     };
 
     mockPayoutsService = {
@@ -109,7 +111,9 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
     // Verify WhatsApp payload
     expect(result.whatsappPayload.to).toBe('9876543210');
     expect(result.whatsappPayload.message).toContain('₹25,000');
-    expect(result.whatsappPayload.message).toContain('https://rzp.io/i/auth_mandate_456');
+    expect(result.whatsappPayload.message).toContain(
+      'https://rzp.io/i/auth_mandate_456',
+    );
     expect(mockWhatsAppAdapter.send).toHaveBeenCalled();
 
     // Verify Razorpay plan creation
@@ -181,7 +185,10 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
     });
 
     const result = await service.cancelMandate('mandate-1', orgId, userId);
-    expect(mockRazorpayAdapter.cancelSubscription).toHaveBeenCalledWith('sub_rent_456', false);
+    expect(mockRazorpayAdapter.cancelSubscription).toHaveBeenCalledWith(
+      'sub_rent_456',
+      false,
+    );
     expect(result.status).toBe('REVOKED');
     expect(result.collectionMode).toBe('MANUAL_COLLECTION');
   });

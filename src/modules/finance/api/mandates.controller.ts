@@ -46,7 +46,8 @@ export class MandatesController {
   @HttpCode(HttpStatus.CREATED)
   @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
   @ApiOperation({
-    summary: 'Generate an automated rent collection mandate (UPI AutoPay & e-Mandate)',
+    summary:
+      'Generate an automated rent collection mandate (UPI AutoPay & e-Mandate)',
     description:
       'Creates a recurring plan and subscription in Razorpay, returns authorization short_url and triggers WhatsApp notification payload.',
   })
@@ -56,7 +57,10 @@ export class MandatesController {
   })
   @ApiResponse({ status: 400, description: 'Invalid input or tenant status' })
   @ApiResponse({ status: 404, description: 'Tenant or Unit not found' })
-  @ApiResponse({ status: 409, description: 'Tenant already has an active mandate' })
+  @ApiResponse({
+    status: 409,
+    description: 'Tenant already has an active mandate',
+  })
   async createMandate(
     @Body(new ZodValidationPipe(createMandateSchema)) dto: CreateMandateDto,
     @CurrentOrgId() orgId: string,
@@ -68,7 +72,9 @@ export class MandatesController {
   @Get()
   @HttpCode(HttpStatus.OK)
   @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER', 'STAFF', 'VIEWER')
-  @ApiOperation({ summary: 'List tenant autopay mandates with filters and pagination' })
+  @ApiOperation({
+    summary: 'List tenant autopay mandates with filters and pagination',
+  })
   async listMandates(
     @Query(new ZodValidationPipe(queryMandatesSchema)) query: QueryMandatesDto,
     @CurrentOrgId() orgId: string,

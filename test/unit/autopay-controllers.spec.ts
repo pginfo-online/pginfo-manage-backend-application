@@ -41,7 +41,9 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
       }),
       queryMandates: vi.fn().mockResolvedValue({ data: [], total: 0 }),
       getMandate: vi.fn().mockResolvedValue({ id: 'mandate-1' }),
-      cancelMandate: vi.fn().mockResolvedValue({ id: 'mandate-1', status: 'REVOKED' }),
+      cancelMandate: vi
+        .fn()
+        .mockResolvedValue({ id: 'mandate-1', status: 'REVOKED' }),
     };
 
     mockInvoicesService = {
@@ -67,7 +69,11 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
       };
 
       const res = await payoutsController.onboardOwner(dto, orgId, userId);
-      expect(mockPayoutsService.onboardOwner).toHaveBeenCalledWith(dto, orgId, userId);
+      expect(mockPayoutsService.onboardOwner).toHaveBeenCalledWith(
+        dto,
+        orgId,
+        userId,
+      );
       expect(res.accountId).toBe('acc_route_123');
     });
   });
@@ -85,14 +91,26 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
       };
 
       const res = await mandatesController.createMandate(dto, orgId, userId);
-      expect(mockMandatesService.createMandate).toHaveBeenCalledWith(dto, orgId, userId);
+      expect(mockMandatesService.createMandate).toHaveBeenCalledWith(
+        dto,
+        orgId,
+        userId,
+      );
       expect(res.subscriptionId).toBe('sub_123');
       expect(res.shortUrl).toBe('https://rzp.io/i/test');
     });
 
     it('POST /api/v1/rent/mandates/:id/cancel invokes MandatesService.cancelMandate', async () => {
-      const res = await mandatesController.cancelMandate('mandate-1', orgId, userId);
-      expect(mockMandatesService.cancelMandate).toHaveBeenCalledWith('mandate-1', orgId, userId);
+      const res = await mandatesController.cancelMandate(
+        'mandate-1',
+        orgId,
+        userId,
+      );
+      expect(mockMandatesService.cancelMandate).toHaveBeenCalledWith(
+        'mandate-1',
+        orgId,
+        userId,
+      );
       expect(res.status).toBe('REVOKED');
     });
   });
@@ -100,7 +118,10 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
   describe('InvoicesController', () => {
     it('GET /api/v1/rent/invoices/:id invokes InvoicesService.getInvoice', async () => {
       const res = await invoicesController.getInvoice('inv-1', orgId);
-      expect(mockInvoicesService.getInvoice).toHaveBeenCalledWith('inv-1', orgId);
+      expect(mockInvoicesService.getInvoice).toHaveBeenCalledWith(
+        'inv-1',
+        orgId,
+      );
       expect(res.status).toBe('PAID');
     });
   });

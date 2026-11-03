@@ -373,8 +373,31 @@ export class PaymentsService {
       ...(query.residentId ? { residentId: query.residentId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.mode ? { mode: query.mode } : {}),
-      ...(query.propertyId
-        ? { resident: { propertyId: query.propertyId } }
+      ...(query.propertyId || query.search
+        ? {
+            resident: {
+              ...(query.propertyId ? { propertyId: query.propertyId } : {}),
+              ...(query.search
+                ? {
+                    OR: [
+                      {
+                        firstName: {
+                          contains: query.search,
+                          mode: 'insensitive' as const,
+                        },
+                      },
+                      {
+                        lastName: {
+                          contains: query.search,
+                          mode: 'insensitive' as const,
+                        },
+                      },
+                      { mobile: { contains: query.search } },
+                    ],
+                  }
+                : {}),
+            },
+          }
         : {}),
     };
 

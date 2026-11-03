@@ -66,9 +66,15 @@ export class InvoicesService {
         where,
         skip: offset,
         take: query.limit,
-        orderBy: [{ billingYear: 'desc' }, { billingMonth: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [
+          { billingYear: 'desc' },
+          { billingMonth: 'desc' },
+          { createdAt: 'desc' },
+        ],
         include: {
-          tenant: { select: { id: true, firstName: true, lastName: true, mobile: true } },
+          tenant: {
+            select: { id: true, firstName: true, lastName: true, mobile: true },
+          },
           property: { select: { id: true, name: true } },
           unit: { select: { id: true, roomNumber: true } },
         },

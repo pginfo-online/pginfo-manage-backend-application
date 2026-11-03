@@ -107,7 +107,8 @@ export class ReviewsService {
       questions: [
         {
           id: 'q1',
-          prompt: 'How likely are you to recommend our property to friends or colleagues?',
+          prompt:
+            'How likely are you to recommend our property to friends or colleagues?',
           type: 'NPS_10',
           category: 'GENERAL',
         },
@@ -130,7 +131,8 @@ export class ReviewsService {
       id: 'survey-ongoing-ready',
       organizationId: 'default',
       title: 'Ongoing stay feedback',
-      description: "How's everything going? Tell us how we can make your stay better.",
+      description:
+        "How's everything going? Tell us how we can make your stay better.",
       triggerType: 'MONTHLY',
       isAutomatic: true,
       status: 'ACTIVE',
@@ -153,7 +155,8 @@ export class ReviewsService {
         },
         {
           id: 'q3',
-          prompt: 'Suggestions for the upcoming month menu or community events?',
+          prompt:
+            'Suggestions for the upcoming month menu or community events?',
           type: 'TEXT',
           category: 'FOOD',
         },
@@ -164,7 +167,8 @@ export class ReviewsService {
       id: 'survey-moveout-ready',
       organizationId: 'default',
       title: 'Move-out experience feedback',
-      description: "You've moved out – how did it go? We value your exit thoughts.",
+      description:
+        "You've moved out – how did it go? We value your exit thoughts.",
       triggerType: 'MOVE_OUT',
       isAutomatic: true,
       status: 'ACTIVE',
@@ -175,7 +179,8 @@ export class ReviewsService {
       questions: [
         {
           id: 'q1',
-          prompt: 'How clear and transparent was the security deposit refund process?',
+          prompt:
+            'How clear and transparent was the security deposit refund process?',
           type: 'RATING_5',
           category: 'STAFF',
         },
@@ -221,7 +226,8 @@ export class ReviewsService {
       score: 4,
       sentiment: 'POSITIVE',
       categoryScores: { cleanliness: 4, food: 3.5, maintenance: 4, staff: 4.5 },
-      comments: 'Wi-Fi speed is great for work from home. Please add more fruit options in breakfast.',
+      comments:
+        'Wi-Fi speed is great for work from home. Please add more fruit options in breakfast.',
       submittedAt: '2026-10-25T11:15:00.000Z',
     },
     {
@@ -255,11 +261,18 @@ export class ReviewsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listSurveys(orgId: string, query: QuerySurveysDto) {
-    let result = this.surveys;
+    let result = this.surveys.filter(
+      (survey) =>
+        (survey.organizationId === orgId ||
+          survey.organizationId === 'default') &&
+        (!query.propertyId || survey.propertyId === query.propertyId),
+    );
     if (query.search) {
       const q = query.search.toLowerCase();
       result = result.filter(
-        (s) => s.title.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+        (s) =>
+          s.title.toLowerCase().includes(q) ||
+          s.description.toLowerCase().includes(q),
       );
     }
     if (query.triggerType) {
@@ -296,12 +309,18 @@ export class ReviewsService {
     };
 
     this.surveys.unshift(newSurvey);
-    this.logger.log(`Created survey ${newSurvey.id} - "${newSurvey.title}" for org ${orgId}`);
+    this.logger.log(
+      `Created survey ${newSurvey.id} - "${newSurvey.title}" for org ${orgId}`,
+    );
     return newSurvey;
   }
 
   async sendSurvey(dto: SendSurveyDto, orgId: string) {
-    const survey = this.surveys.find((s) => s.id === dto.surveyId);
+    const survey = this.surveys.find(
+      (s) =>
+        s.id === dto.surveyId &&
+        (s.organizationId === orgId || s.organizationId === 'default'),
+    );
     if (!survey) {
       throw new NotFoundError('Survey', dto.surveyId);
     }
@@ -322,7 +341,9 @@ export class ReviewsService {
   }
 
   async listResponses(orgId: string, query: QueryResponsesDto) {
-    let result = this.responses;
+    let result = this.responses.filter(
+      (response) => response.organizationId === orgId,
+    );
     if (query.surveyId) {
       result = result.filter((r) => r.surveyId === query.surveyId);
     }
@@ -383,29 +404,44 @@ export class ReviewsService {
         .filter((r) => r.surveyId === survey.id)
         .map((r) => r.score);
       survey.averageScore =
-        Math.round((allScores.reduce((a, b) => a + b, 0) / allScores.length) * 10) / 10;
+        Math.round(
+          (allScores.reduce((a, b) => a + b, 0) / allScores.length) * 10,
+        ) / 10;
     }
 
     return newResponse;
   }
 
   async getInsights(orgId: string, propertyId?: string) {
-    const totalSurveys = this.surveys.length;
-    const totalSent = this.surveys.reduce((acc, s) => acc + s.sentCount, 0);
-    const totalResponses = this.responses.length;
-    const responseRate = totalSent > 0 ? Math.round((totalResponses / totalSent) * 100) : 78;
+    const surveys = this.surveys.filter(
+      (survey) =>
+        (survey.organizationId === orgId ||
+          survey.organizationId === 'default') &&
+        (!propertyId || survey.propertyId === propertyId),
+    );
+    const surveyIds = new Set(surveys.map((survey) => survey.id));
+    const responses = this.responses.filter(
+      (response) =>
+        response.organizationId === orgId && surveyIds.has(response.surveyId),
+    );
+    const totalSent = surveys.reduce((acc, s) => acc + s.sentCount, 0);
+    const totalResponses = responses.length;
+    const responseRate =
+      totalSent > 0 ? Math.round((totalResponses / totalSent) * 100) : 78;
 
     const avgScore =
-      this.responses.length > 0
+      responses.length > 0
         ? Math.round(
-            (this.responses.reduce((acc, r) => acc + r.score, 0) / this.responses.length) * 10,
+            (responses.reduce((acc, r) => acc + r.score, 0) /
+              responses.length) *
+              10,
           ) / 10
         : 4.4;
 
     // NPS Calculation: promoters (scores 9-10 or 5-star), passives (7-8 or 4-star), detractors (1-6 or <=3)
-    const promoters = this.responses.filter((r) => r.score >= 5).length;
-    const passives = this.responses.filter((r) => r.score === 4).length;
-    const detractors = this.responses.filter((r) => r.score <= 3).length;
+    const promoters = responses.filter((r) => r.score >= 5).length;
+    const passives = responses.filter((r) => r.score === 4).length;
+    const detractors = responses.filter((r) => r.score <= 3).length;
     const nps =
       totalResponses > 0
         ? Math.round(((promoters - detractors) / totalResponses) * 100)
@@ -413,10 +449,30 @@ export class ReviewsService {
 
     // Category metrics
     const categories = {
-      cleanliness: { score: 4.6, outOf: 5, responses: 24, label: 'Cleanliness & Hygiene' },
-      food: { score: 4.1, outOf: 5, responses: 19, label: 'Food & Mess Quality' },
-      maintenance: { score: 4.3, outOf: 5, responses: 22, label: 'Maintenance Speed' },
-      staff: { score: 4.8, outOf: 5, responses: 26, label: 'Staff Support & Security' },
+      cleanliness: {
+        score: 4.6,
+        outOf: 5,
+        responses: 24,
+        label: 'Cleanliness & Hygiene',
+      },
+      food: {
+        score: 4.1,
+        outOf: 5,
+        responses: 19,
+        label: 'Food & Mess Quality',
+      },
+      maintenance: {
+        score: 4.3,
+        outOf: 5,
+        responses: 22,
+        label: 'Maintenance Speed',
+      },
+      staff: {
+        score: 4.8,
+        outOf: 5,
+        responses: 26,
+        label: 'Staff Support & Security',
+      },
     };
 
     return {
@@ -428,9 +484,15 @@ export class ReviewsService {
         responseRate,
       },
       npsBreakdown: {
-        promotersPercentage: Math.round((promoters / (totalResponses || 1)) * 100),
-        passivesPercentage: Math.round((passives / (totalResponses || 1)) * 100),
-        detractorsPercentage: Math.round((detractors / (totalResponses || 1)) * 100),
+        promotersPercentage: Math.round(
+          (promoters / (totalResponses || 1)) * 100,
+        ),
+        passivesPercentage: Math.round(
+          (passives / (totalResponses || 1)) * 100,
+        ),
+        detractorsPercentage: Math.round(
+          (detractors / (totalResponses || 1)) * 100,
+        ),
       },
       categories,
     };

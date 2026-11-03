@@ -86,7 +86,8 @@ export class ReviewsController {
   @ApiOperation({ summary: 'List all submitted survey and review responses' })
   @ApiResponse({ status: 200, description: 'Responses fetched successfully' })
   async listResponses(
-    @Query(new ZodValidationPipe(queryResponsesSchema)) query: QueryResponsesDto,
+    @Query(new ZodValidationPipe(queryResponsesSchema))
+    query: QueryResponsesDto,
     @CurrentOrgId() orgId: string,
   ) {
     return this.reviewsService.listResponses(orgId, query);
@@ -104,7 +105,9 @@ export class ReviewsController {
   }
 
   @Get('insights')
-  @ApiOperation({ summary: 'Get aggregated NPS, CSAT, and category review metrics' })
+  @ApiOperation({
+    summary: 'Get aggregated NPS, CSAT, and category review metrics',
+  })
   @ApiResponse({ status: 200, description: 'Insights metrics calculated' })
   async getInsights(
     @Query('propertyId') propertyId: string | undefined,

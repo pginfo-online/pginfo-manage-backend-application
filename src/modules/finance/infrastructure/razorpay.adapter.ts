@@ -55,7 +55,7 @@ export interface SubscriptionResult {
 
 export interface RouteTransferItem {
   account: string; // Landlord linked account_id
-  amount: number;  // in paise
+  amount: number; // in paise
   currency?: string;
   notes?: Record<string, string>;
   onHold?: number;
@@ -108,9 +108,9 @@ export class RazorpayAdapter {
     const keySecret = this.getKeySecret();
     return Boolean(
       keyId &&
-        keySecret &&
-        !keyId.startsWith('rzp_test_xxxx') &&
-        !keyId.startsWith('rzp_test_mock'),
+      keySecret &&
+      !keyId.startsWith('rzp_test_xxxx') &&
+      !keyId.startsWith('rzp_test_mock'),
     );
   }
 
@@ -343,7 +343,8 @@ export class RazorpayAdapter {
               name: options.name,
               amount: options.amountPaise,
               currency: options.currency || 'INR',
-              description: options.description || 'Monthly Rent Autopay Mandate',
+              description:
+                options.description || 'Monthly Rent Autopay Mandate',
             },
             notes: options.notes,
           }),
@@ -616,7 +617,9 @@ export class RazorpayAdapter {
           this.logger.error(
             `Razorpay payment link creation failed: ${JSON.stringify(errorData)}`,
           );
-          throw new Error(`Razorpay Payment Link error: ${response.statusText}`);
+          throw new Error(
+            `Razorpay Payment Link error: ${response.statusText}`,
+          );
         }
 
         const data = (await response.json()) as {

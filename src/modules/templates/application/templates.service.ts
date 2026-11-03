@@ -134,7 +134,9 @@ export class TemplatesService {
         })
       : today;
 
-    const fullName = [resident.firstName, resident.lastName].filter(Boolean).join(' ');
+    const fullName = [resident.firstName, resident.lastName]
+      .filter(Boolean)
+      .join(' ');
 
     let rendered = template.content
       .replace(/{{resident_name}}/gi, fullName || 'Resident')

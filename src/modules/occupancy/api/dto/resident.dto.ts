@@ -19,6 +19,14 @@ export const createResidentSchema = z.object({
     .regex(/^[6-9]\d{9}$/)
     .optional(),
   emergencyContact: z.string().optional(),
+  permanentAddress: z.string().trim().optional(),
+  parentName: z.string().trim().optional(),
+  parentPhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/)
+    .optional(),
+  idProofUrl: z.string().url().optional(),
+  agreementUrl: z.string().url().optional(),
   profession: z.nativeEnum(Profession).default('OTHER'),
   monthlyRent: z.coerce
     .number()
@@ -63,6 +71,14 @@ export const updateResidentSchema = z.object({
     .regex(/^[6-9]\d{9}$/)
     .optional(),
   emergencyContact: z.string().optional(),
+  permanentAddress: z.string().trim().optional(),
+  parentName: z.string().trim().optional(),
+  parentPhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/)
+    .optional(),
+  idProofUrl: z.string().url().optional(),
+  agreementUrl: z.string().url().optional(),
   profession: z.nativeEnum(Profession).optional(),
   monthlyRent: z.coerce.number().int().positive().optional(),
   status: z.nativeEnum(ResidentStatus).optional(),

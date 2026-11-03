@@ -25,7 +25,10 @@ export class RazorpayWebhookController {
       'Authoritative Razorpay webhook handler for Autopay mandates, charges, splits, and failures',
   })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
-  @ApiResponse({ status: 400, description: 'Missing signature header or invalid body' })
+  @ApiResponse({
+    status: 400,
+    description: 'Missing signature header or invalid body',
+  })
   @ApiResponse({ status: 401, description: 'Invalid HMAC signature' })
   async handleWebhook(
     @Headers('x-razorpay-signature') signature: string,

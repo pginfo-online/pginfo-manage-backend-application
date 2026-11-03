@@ -115,6 +115,9 @@ export class PayoutsService {
         metadata: {
           rawStatus: routeAccount.status,
           onboardedAt: new Date().toISOString(),
+          ...(dto.panNumber
+            ? { panMasked: `*****${dto.panNumber.slice(-4)}` }
+            : {}),
         },
       },
     });
@@ -156,9 +159,7 @@ export class PayoutsService {
       where: {
         organizationId: orgId,
         status: 'ACTIVE',
-        ...(propertyId
-          ? { OR: [{ propertyId }, { propertyId: null }] }
-          : {}),
+        ...(propertyId ? { OR: [{ propertyId }, { propertyId: null }] } : {}),
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -193,7 +194,9 @@ export class PayoutsService {
         orderBy: { createdAt: 'desc' },
         include: {
           property: { select: { id: true, name: true } },
-          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          user: {
+            select: { id: true, firstName: true, lastName: true, email: true },
+          },
         },
       }),
       this.prisma.landlordPayoutAccount.count({ where }),

@@ -96,7 +96,10 @@ export class RazorpayWebhookService {
    */
   async handleWebhook(rawBody: string, signature: string) {
     // 1. Strict cryptographic signature verification
-    const isValid = this.razorpayAdapter.verifyWebhookSignature(rawBody, signature);
+    const isValid = this.razorpayAdapter.verifyWebhookSignature(
+      rawBody,
+      signature,
+    );
     if (!isValid) {
       this.logger.warn('Razorpay webhook HMAC signature verification failed');
       throw new UnauthorizedError('Invalid webhook signature');
@@ -132,7 +135,9 @@ export class RazorpayWebhookService {
       };
     }
 
-    this.logger.log(`Processing authoritative webhook event: ${event.event} [${eventId}]`);
+    this.logger.log(
+      `Processing authoritative webhook event: ${event.event} [${eventId}]`,
+    );
 
     try {
       // 4. Route event to specific handler
@@ -183,7 +188,10 @@ export class RazorpayWebhookService {
       return { received: true, event: event.event, eventId };
     } catch (err: unknown) {
       const errorMsg = (err as Error).message;
-      this.logger.error(`Error processing webhook event ${event.event}: ${errorMsg}`, (err as Error).stack);
+      this.logger.error(
+        `Error processing webhook event ${event.event}: ${errorMsg}`,
+        (err as Error).stack,
+      );
 
       // Record failure for diagnostics but still persist event
       try {
@@ -215,7 +223,9 @@ export class RazorpayWebhookService {
 
     const subscriptionId = sub?.id || payment?.subscription_id;
     if (!subscriptionId) {
-      this.logger.warn('No subscription_id found in subscription.authenticated event');
+      this.logger.warn(
+        'No subscription_id found in subscription.authenticated event',
+      );
       return;
     }
 
@@ -225,7 +235,9 @@ export class RazorpayWebhookService {
     });
 
     if (!mandate) {
-      this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+      this.logger.warn(
+        `TenantMandate not found for subscription ${subscriptionId}`,
+      );
       return;
     }
 
@@ -266,7 +278,9 @@ export class RazorpayWebhookService {
       },
     });
 
-    this.logger.log(`Mandate ${mandate.id} activated for tenant ${mandate.tenant.firstName}`);
+    this.logger.log(
+      `Mandate ${mandate.id} activated for tenant ${mandate.tenant.firstName}`,
+    );
   }
 
   /**
@@ -285,7 +299,9 @@ export class RazorpayWebhookService {
     const totalAmount = payment?.amount;
 
     if (!paymentId || !subscriptionId || !totalAmount) {
-      this.logger.warn('Incomplete payment/subscription details in subscription.charged event');
+      this.logger.warn(
+        'Incomplete payment/subscription details in subscription.charged event',
+      );
       return;
     }
 
@@ -300,7 +316,9 @@ export class RazorpayWebhookService {
     });
 
     if (!mandate) {
-      this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+      this.logger.warn(
+        `TenantMandate not found for subscription ${subscriptionId}`,
+      );
       return;
     }
 
@@ -340,7 +358,9 @@ export class RazorpayWebhookService {
           transferAmount,
           status: 'PAID',
           collectionType: 'AUTOPAY',
-          dueDate: new Date(Date.UTC(billingYear, billingMonth - 1, mandate.billingDay)),
+          dueDate: new Date(
+            Date.UTC(billingYear, billingMonth - 1, mandate.billingDay),
+          ),
           paidAt: now,
           razorpayPaymentId: paymentId,
         },
@@ -415,16 +435,19 @@ export class RazorpayWebhookService {
 
     if (linkedAccountId && transferAmount > 0) {
       try {
-        const transferResult = await this.razorpayAdapter.transferPayment(paymentId, {
-          account: linkedAccountId,
-          amount: transferAmount,
-          currency: 'INR',
-          notes: {
-            invoiceId: invoice.id,
-            rentPeriod: `${billingMonth}/${billingYear}`,
-            tenantId: mandate.tenantId,
+        const transferResult = await this.razorpayAdapter.transferPayment(
+          paymentId,
+          {
+            account: linkedAccountId,
+            amount: transferAmount,
+            currency: 'INR',
+            notes: {
+              invoiceId: invoice.id,
+              rentPeriod: `${billingMonth}/${billingYear}`,
+              tenantId: mandate.tenantId,
+            },
           },
-        });
+        );
         transferId = transferResult.transferId;
 
         await this.prisma.rentInvoice.update({
@@ -447,7 +470,15 @@ export class RazorpayWebhookService {
     }
 
     // Trigger payment receipts
-    await this.sendReceiptNotifications(mandate, totalAmount, platformFee, transferAmount, billingMonth, billingYear, paymentId);
+    await this.sendReceiptNotifications(
+      mandate,
+      totalAmount,
+      platformFee,
+      transferAmount,
+      billingMonth,
+      billingYear,
+      paymentId,
+    );
   }
 
   /**
@@ -464,7 +495,9 @@ export class RazorpayWebhookService {
   ) {
     const rentRupees = Monetary.toRupees(totalAmount);
     const landlordRupees = Monetary.toRupees(transferAmount);
-    const unitStr = mandate.unit ? `Unit ${mandate.unit.roomNumber}` : 'your unit';
+    const unitStr = mandate.unit
+      ? `Unit ${mandate.unit.roomNumber}`
+      : 'your unit';
 
     // Tenant receipt via WhatsApp
     const tenantPhone = mandate.tenant.whatsappNumber || mandate.tenant.mobile;
@@ -489,7 +522,9 @@ export class RazorpayWebhookService {
           },
         });
       } catch (err) {
-        this.logger.warn(`Failed to send tenant WhatsApp receipt: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to send tenant WhatsApp receipt: ${(err as Error).message}`,
+        );
       }
     }
 
@@ -509,7 +544,9 @@ export class RazorpayWebhookService {
           message: landlordMsg,
         });
       } catch (err) {
-        this.logger.warn(`Failed to send landlord WhatsApp notification: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to send landlord WhatsApp notification: ${(err as Error).message}`,
+        );
       }
     }
   }
@@ -537,11 +574,18 @@ export class RazorpayWebhookService {
 
     const mandate = await this.prisma.tenantMandate.findUnique({
       where: { razorpaySubscriptionId: subscriptionId },
-      include: { tenant: true, property: true, unit: true, landlordPayoutAccount: true },
+      include: {
+        tenant: true,
+        property: true,
+        unit: true,
+        landlordPayoutAccount: true,
+      },
     });
 
     if (!mandate) {
-      this.logger.warn(`TenantMandate not found for failed subscription ${subscriptionId}`);
+      this.logger.warn(
+        `TenantMandate not found for failed subscription ${subscriptionId}`,
+      );
       return;
     }
 
@@ -569,7 +613,9 @@ export class RazorpayWebhookService {
       });
       fallbackPaymentUrl = link.shortUrl;
     } catch (err) {
-      this.logger.error(`Failed to generate fallback payment link: ${(err as Error).message}`);
+      this.logger.error(
+        `Failed to generate fallback payment link: ${(err as Error).message}`,
+      );
     }
 
     // Update / create RentInvoice with status = FAILED and increment retry count
@@ -592,10 +638,15 @@ export class RazorpayWebhookService {
         billingYear,
         amount: mandate.rentAmount,
         platformFee: this.getPlatformFeePaise(),
-        transferAmount: Math.max(0, mandate.rentAmount - this.getPlatformFeePaise()),
+        transferAmount: Math.max(
+          0,
+          mandate.rentAmount - this.getPlatformFeePaise(),
+        ),
         status: 'FAILED',
         collectionType: 'FALLBACK_LINK',
-        dueDate: new Date(Date.UTC(billingYear, billingMonth - 1, mandate.billingDay)),
+        dueDate: new Date(
+          Date.UTC(billingYear, billingMonth - 1, mandate.billingDay),
+        ),
         retryCount: 1,
         failureReason,
         fallbackPaymentUrl,
@@ -638,7 +689,9 @@ export class RazorpayWebhookService {
           templateName: 'rent_autopay_failed_fallback',
         });
       } catch (err) {
-        this.logger.warn(`Failed to send failure fallback WhatsApp: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to send failure fallback WhatsApp: ${(err as Error).message}`,
+        );
       }
     }
 
@@ -653,7 +706,9 @@ export class RazorpayWebhookService {
    * - Notifies the landlord that the tenant disabled Autopay.
    * - Flags the unit / mandate as MANUAL_COLLECTION.
    */
-  private async handleSubscriptionCancelledOrPaused(event: RazorpayWebhookPayload) {
+  private async handleSubscriptionCancelledOrPaused(
+    event: RazorpayWebhookPayload,
+  ) {
     const sub = event.payload.subscription?.entity;
     const subscriptionId = sub?.id;
 
@@ -673,7 +728,9 @@ export class RazorpayWebhookService {
     });
 
     if (!mandate) {
-      this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+      this.logger.warn(
+        `TenantMandate not found for subscription ${subscriptionId}`,
+      );
       return;
     }
 
@@ -689,7 +746,9 @@ export class RazorpayWebhookService {
       },
     });
 
-    const unitStr = mandate.unit ? `Unit ${mandate.unit.roomNumber}` : 'their unit';
+    const unitStr = mandate.unit
+      ? `Unit ${mandate.unit.roomNumber}`
+      : 'their unit';
     const landlordPhone = mandate.landlordPayoutAccount?.phone;
 
     if (landlordPhone && this.whatsappAdapter) {
@@ -705,7 +764,9 @@ export class RazorpayWebhookService {
           message: landlordAlert,
         });
       } catch (err) {
-        this.logger.warn(`Failed to notify landlord of mandate cancellation: ${(err as Error).message}`);
+        this.logger.warn(
+          `Failed to notify landlord of mandate cancellation: ${(err as Error).message}`,
+        );
       }
     }
 
@@ -723,7 +784,9 @@ export class RazorpayWebhookService {
       },
     });
 
-    this.logger.log(`Mandate ${mandate.id} marked as ${newStatus} (MANUAL_COLLECTION)`);
+    this.logger.log(
+      `Mandate ${mandate.id} marked as ${newStatus} (MANUAL_COLLECTION)`,
+    );
   }
 
   /**

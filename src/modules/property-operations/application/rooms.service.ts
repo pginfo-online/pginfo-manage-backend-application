@@ -1,11 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
+import { buildOffsetResponse } from '../../../common/pagination/index.js';
+import { Prisma } from '@prisma/client';
 import type {
   CreateRoomDto,
   UpdateRoomDto,
   CreateBedDto,
   UpdateBedDto,
+  QueryRoomsDto,
 } from '../api/dto/room.dto.js';
 
 @Injectable()
@@ -75,7 +78,20 @@ export class RoomsService {
           ? dto.bedNames
           : dto.initialBedCount && dto.initialBedCount > 0
             ? Array.from({ length: dto.initialBedCount }, (_, i) => {
-                const bedLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+                const bedLetters = [
+                  'A',
+                  'B',
+                  'C',
+                  'D',
+                  'E',
+                  'F',
+                  'G',
+                  'H',
+                  'I',
+                  'J',
+                  'K',
+                  'L',
+                ];
                 return `Bed${bedLetters[i] ?? `${i + 1}`}`;
               })
             : [];
@@ -86,7 +102,8 @@ export class RoomsService {
           organizationId: orgId,
           bedNumber: name,
           status: 'AVAILABLE' as const,
-          rentAmount: dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
+          rentAmount:
+            dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
         }));
 
         await tx.bed.createMany({ data: bedsData });
@@ -112,7 +129,7 @@ export class RoomsService {
   /**
    * Lists all rooms in a property with beds.
    */
-  async findAll(propertyId: string, orgId: string) {
+  async findAll(propertyId: string, orgId: string, query?: QueryRoomsDto) {
     const property = await this.prisma.property.findFirst({
       where: { id: propertyId, organizationId: orgId },
     });
@@ -121,38 +138,70 @@ export class RoomsService {
       throw new NotFoundError('Property', propertyId);
     }
 
-    return this.prisma.room.findMany({
-      where: { propertyId, status: { not: 'ARCHIVED' } },
-      include: {
-        beds: {
-          where: { status: { not: 'ARCHIVED' } },
-          include: {
-            residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                status: true,
-                mobile: true,
+    const where: Prisma.RoomWhereInput = {
+      propertyId,
+      status: query?.status ?? { not: 'ARCHIVED' },
+      ...(query?.sharingType ? { sharingType: query.sharingType } : {}),
+      ...(query?.gender ? { gender: query.gender } : {}),
+      ...(query?.search
+        ? { roomNumber: { contains: query.search, mode: 'insensitive' } }
+        : {}),
+      ...(query?.vacancy === 'VACANT'
+        ? { beds: { some: { status: 'AVAILABLE' } } }
+        : query?.vacancy === 'FULL'
+          ? {
+              AND: [
+                { beds: { some: {} } },
+                { beds: { none: { status: 'AVAILABLE' } } },
+              ],
+            }
+          : {}),
+    };
+    const [rooms, total] = await Promise.all([
+      this.prisma.room.findMany({
+        where,
+        ...(query
+          ? { skip: (query.page - 1) * query.limit, take: query.limit }
+          : {}),
+        include: {
+          beds: {
+            where: { status: { not: 'ARCHIVED' } },
+            include: {
+              residents: {
+                where: {
+                  status: {
+                    in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                  },
+                },
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  status: true,
+                  mobile: true,
+                },
+              },
+              bookings: {
+                where: { status: { in: ['CONFIRMED'] } },
+                select: {
+                  id: true,
+                  guestName: true,
+                  guestMobile: true,
+                  expectedMoveIn: true,
+                  status: true,
+                },
               },
             },
-            bookings: {
-              where: { status: { in: ['CONFIRMED'] } },
-              select: {
-                id: true,
-                guestName: true,
-                guestMobile: true,
-                expectedMoveIn: true,
-                status: true,
-              },
-            },
+            orderBy: { bedNumber: 'asc' },
           },
-          orderBy: { bedNumber: 'asc' },
         },
-      },
-      orderBy: [{ floor: 'asc' }, { roomNumber: 'asc' }],
-    });
+        orderBy: [{ floor: 'asc' }, { roomNumber: 'asc' }],
+      }),
+      this.prisma.room.count({ where }),
+    ]);
+    return query
+      ? buildOffsetResponse(rooms, total, query.page, query.limit)
+      : rooms;
   }
 
   /**
@@ -174,7 +223,9 @@ export class RoomsService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+              where: {
+                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+              },
               select: {
                 id: true,
                 firstName: true,
@@ -471,7 +522,9 @@ export class RoomsService {
       data: {
         organizationId: orgId,
         userId,
-        action: updated.isDisabledForRent ? 'room.disable_rent' : 'room.enable_rent',
+        action: updated.isDisabledForRent
+          ? 'room.disable_rent'
+          : 'room.enable_rent',
         entityType: 'Room',
         entityId: id,
       },
@@ -531,7 +584,9 @@ export class RoomsService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+              where: {
+                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+              },
             },
             bookings: {
               where: { status: { in: ['CONFIRMED'] } },
@@ -557,7 +612,8 @@ export class RoomsService {
         },
       }),
     ]);
-    const newBookingsCount = (confirmedBookingsCount || 0) + (pendingResidentsCount || 0);
+    const newBookingsCount =
+      (confirmedBookingsCount || 0) + (pendingResidentsCount || 0);
 
     let totalBeds = 0;
     let vacantRooms = 0;
@@ -600,7 +656,9 @@ export class RoomsService {
           disabledForRentBeds++;
         }
 
-        const activeResidents = bed.residents.filter((r) => r.status === 'ACTIVE');
+        const activeResidents = bed.residents.filter(
+          (r) => r.status === 'ACTIVE',
+        );
         const noticeResidents = bed.residents.filter(
           (r) => r.status === 'NOTICE_PERIOD',
         );
@@ -608,7 +666,9 @@ export class RoomsService {
           (r) => r.status === 'PENDING_MOVE_IN',
         );
         const totalResidents =
-          activeResidents.length + noticeResidents.length + pendingResidents.length;
+          activeResidents.length +
+          noticeResidents.length +
+          pendingResidents.length;
         const totalBookings = bed.bookings.length;
 
         underNoticeTenants += noticeResidents.length;
@@ -625,7 +685,11 @@ export class RoomsService {
           const count = Math.max(1, totalResidents);
           occupiedBeds += count;
           roomOccupiedBeds += count;
-        } else if (!isBedDisabled && bed.status === 'AVAILABLE' && totalBookings === 0) {
+        } else if (
+          !isBedDisabled &&
+          bed.status === 'AVAILABLE' &&
+          totalBookings === 0
+        ) {
           vacantBeds++;
         }
 
@@ -640,7 +704,11 @@ export class RoomsService {
         occupiedRooms++;
       }
 
-      if (roomBedCount > 0 && roomOccupiedBeds === 0 && !room.isDisabledForRent) {
+      if (
+        roomBedCount > 0 &&
+        roomOccupiedBeds === 0 &&
+        !room.isDisabledForRent
+      ) {
         vacantRooms++;
       } else if (roomOccupiedBeds > 0 && roomOccupiedBeds < roomBedCount) {
         semiVacantRooms++;

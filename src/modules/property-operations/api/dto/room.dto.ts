@@ -78,3 +78,15 @@ export const updateBedSchema = z.object({
 });
 
 export type UpdateBedDto = z.infer<typeof updateBedSchema>;
+
+export const queryRoomsSchema = z.object({
+  search: z.string().trim().max(100).optional(),
+  status: z.nativeEnum(RoomStatus).optional(),
+  sharingType: z.nativeEnum(SharingType).optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'UNISEX']).optional(),
+  vacancy: z.enum(['VACANT', 'FULL']).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
+export type QueryRoomsDto = z.infer<typeof queryRoomsSchema>;

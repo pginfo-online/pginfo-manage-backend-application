@@ -1,16 +1,28 @@
 import { z } from 'zod';
 
-export const SurveyTriggerType = z.enum(['MANUAL', 'MOVE_IN', 'MONTHLY', 'MOVE_OUT']);
+export const SurveyTriggerType = z.enum([
+  'MANUAL',
+  'MOVE_IN',
+  'MONTHLY',
+  'MOVE_OUT',
+]);
 export type SurveyTriggerType = z.infer<typeof SurveyTriggerType>;
 
-export const QuestionType = z.enum(['RATING_5', 'NPS_10', 'TEXT', 'SINGLE_CHOICE']);
+export const QuestionType = z.enum([
+  'RATING_5',
+  'NPS_10',
+  'TEXT',
+  'SINGLE_CHOICE',
+]);
 export type QuestionType = z.infer<typeof QuestionType>;
 
 export const surveyQuestionSchema = z.object({
   id: z.string().optional(),
   prompt: z.string().min(3),
   type: QuestionType,
-  category: z.enum(['CLEANLINESS', 'FOOD', 'MAINTENANCE', 'STAFF', 'GENERAL']).default('GENERAL'),
+  category: z
+    .enum(['CLEANLINESS', 'FOOD', 'MAINTENANCE', 'STAFF', 'GENERAL'])
+    .default('GENERAL'),
   options: z.array(z.string()).optional(),
   required: z.boolean().default(true),
 });
@@ -21,7 +33,9 @@ export const createSurveySchema = z.object({
   description: z.string().optional(),
   triggerType: SurveyTriggerType.default('MANUAL'),
   isAutomatic: z.boolean().default(false),
-  questions: z.array(surveyQuestionSchema).min(1, 'At least one question is required'),
+  questions: z
+    .array(surveyQuestionSchema)
+    .min(1, 'At least one question is required'),
 });
 
 export type CreateSurveyDto = z.infer<typeof createSurveySchema>;

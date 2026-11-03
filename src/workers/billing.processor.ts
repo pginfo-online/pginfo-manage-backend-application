@@ -101,7 +101,9 @@ export class BillingProcessor extends WorkerHost {
                 transferAmount: Math.max(0, mandate.rentAmount - 3000),
                 status: 'PENDING',
                 collectionType: 'AUTOPAY',
-                dueDate: new Date(Date.UTC(year, month - 1, mandate.billingDay)),
+                dueDate: new Date(
+                  Date.UTC(year, month - 1, mandate.billingDay),
+                ),
               },
             });
             reconciledCount++;

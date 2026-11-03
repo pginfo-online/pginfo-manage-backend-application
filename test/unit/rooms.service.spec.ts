@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RoomsService } from '../../src/modules/property-operations/application/rooms.service.js';
-import { ConflictError, NotFoundError } from '../../src/common/errors/index.js';
 
 describe('RoomsService', () => {
   let service: RoomsService;
@@ -44,7 +43,10 @@ describe('RoomsService', () => {
   });
 
   it('should calculate all 17 inventory statistics accurately', async () => {
-    mockPrisma.property.findFirst.mockResolvedValue({ id: 'prop-1', name: 'Vanalilka' });
+    mockPrisma.property.findFirst.mockResolvedValue({
+      id: 'prop-1',
+      name: 'Vanalilka',
+    });
 
     // Mock 2 rooms: Room 101 with 4 beds, Room 102 with 2 beds
     mockPrisma.room.findMany.mockResolvedValue([
@@ -56,10 +58,38 @@ describe('RoomsService', () => {
         isDisabledForRent: false,
         isVerified: true,
         beds: [
-          { id: 'b1', bedNumber: 'BedA', status: 'OCCUPIED', isDisabledForRent: false, residents: [{ status: 'ACTIVE' }], bookings: [] },
-          { id: 'b2', bedNumber: 'BedB', status: 'OCCUPIED', isDisabledForRent: false, residents: [{ status: 'ACTIVE' }], bookings: [] },
-          { id: 'b3', bedNumber: 'BedC', status: 'AVAILABLE', isDisabledForRent: false, residents: [], bookings: [] },
-          { id: 'b4', bedNumber: 'BedD', status: 'OCCUPIED', isDisabledForRent: false, residents: [{ status: 'NOTICE_PERIOD' }], bookings: [{ id: 'bk-1' }] },
+          {
+            id: 'b1',
+            bedNumber: 'BedA',
+            status: 'OCCUPIED',
+            isDisabledForRent: false,
+            residents: [{ status: 'ACTIVE' }],
+            bookings: [],
+          },
+          {
+            id: 'b2',
+            bedNumber: 'BedB',
+            status: 'OCCUPIED',
+            isDisabledForRent: false,
+            residents: [{ status: 'ACTIVE' }],
+            bookings: [],
+          },
+          {
+            id: 'b3',
+            bedNumber: 'BedC',
+            status: 'AVAILABLE',
+            isDisabledForRent: false,
+            residents: [],
+            bookings: [],
+          },
+          {
+            id: 'b4',
+            bedNumber: 'BedD',
+            status: 'OCCUPIED',
+            isDisabledForRent: false,
+            residents: [{ status: 'NOTICE_PERIOD' }],
+            bookings: [{ id: 'bk-1' }],
+          },
         ],
       },
       {
@@ -70,8 +100,22 @@ describe('RoomsService', () => {
         isDisabledForRent: true,
         isVerified: false,
         beds: [
-          { id: 'b5', bedNumber: 'BedA', status: 'AVAILABLE', isDisabledForRent: true, residents: [], bookings: [] },
-          { id: 'b6', bedNumber: 'BedB', status: 'AVAILABLE', isDisabledForRent: true, residents: [], bookings: [] },
+          {
+            id: 'b5',
+            bedNumber: 'BedA',
+            status: 'AVAILABLE',
+            isDisabledForRent: true,
+            residents: [],
+            bookings: [],
+          },
+          {
+            id: 'b6',
+            bedNumber: 'BedB',
+            status: 'AVAILABLE',
+            isDisabledForRent: true,
+            residents: [],
+            bookings: [],
+          },
         ],
       },
     ]);

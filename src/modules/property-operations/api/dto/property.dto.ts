@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PropertyType, PropertyStatus } from '@prisma/client';
+import { isValidTimeZone } from '../../../../common/time/property-date.js';
 
 export const createPropertySchema = z.object({
   name: z.string().min(2, 'Property name is required').trim(),
@@ -12,12 +13,16 @@ export const createPropertySchema = z.object({
     .string()
     .regex(/^[1-9][0-9]{5}$/, 'Please enter a valid 6-digit Indian PIN code'),
   country: z.string().length(2).default('IN'),
+  ownerName: z.string().min(2).trim().optional(),
   contactPhone: z
     .string()
     .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit mobile number')
     .optional(),
   contactEmail: z.string().email().optional(),
-  timezone: z.string().default('Asia/Kolkata'),
+  timezone: z
+    .string()
+    .refine(isValidTimeZone, 'Please enter a valid IANA timezone')
+    .default('Asia/Kolkata'),
   rentDueDay: z.coerce.number().int().min(1).max(28).default(1),
   description: z.string().optional(),
   amenities: z.array(z.string()).default([]),

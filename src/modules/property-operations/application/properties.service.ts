@@ -98,7 +98,9 @@ export class PropertiesService {
             },
           },
           residents: {
-            where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+            where: {
+              status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+            },
             select: { id: true, status: true },
           },
           bookings: {
@@ -145,7 +147,12 @@ export class PropertiesService {
       const bookingsCount = p.bookings.length;
       const pendingDuesPaise = propertyDuesMap.get(p.id) ?? 0;
 
-      const { rooms, residents, bookings, ...rest } = p;
+      const {
+        rooms: _rooms,
+        residents: _residents,
+        bookings: _bookings,
+        ...rest
+      } = p;
 
       return {
         ...rest,
@@ -178,7 +185,9 @@ export class PropertiesService {
           select: {
             rooms: { where: { status: { not: 'ARCHIVED' } } },
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+              where: {
+                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+              },
             },
             staff: { where: { status: 'ACTIVE' } },
             complaints: { where: { status: { not: 'RESOLVED' } } },
@@ -209,7 +218,8 @@ export class PropertiesService {
 
     for (const stat of bedStats) {
       totalBeds += stat._count;
-      if (stat.status === 'OCCUPIED' || stat.status === 'RESERVED') occupiedBeds += stat._count;
+      if (stat.status === 'OCCUPIED' || stat.status === 'RESERVED')
+        occupiedBeds += stat._count;
       if (stat.status === 'AVAILABLE') availableBeds += stat._count;
     }
 
@@ -346,7 +356,9 @@ export class PropertiesService {
           where: { status: { not: 'ARCHIVED' } },
           include: {
             residents: {
-              where: { status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] } },
+              where: {
+                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+              },
               select: {
                 id: true,
                 firstName: true,

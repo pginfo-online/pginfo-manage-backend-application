@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -27,6 +28,8 @@ import {
   type UpdateRoomDto,
   type CreateBedDto,
   type UpdateBedDto,
+  queryRoomsSchema,
+  type QueryRoomsDto,
 } from './dto/room.dto.js';
 import { ZodValidationPipe } from '../../../common/validation/index.js';
 import {
@@ -71,6 +74,16 @@ export class RoomsController {
     return this.roomsService.findAll(propertyId, orgId);
   }
 
+  @Get('properties/:propertyId/rooms-page')
+  @ApiOperation({ summary: 'Search and page rooms in a property' })
+  async findRoomsPage(
+    @Param('propertyId', new ParseUUIDPipe()) propertyId: string,
+    @Query(new ZodValidationPipe(queryRoomsSchema)) query: QueryRoomsDto,
+    @CurrentOrgId() orgId: string,
+  ) {
+    return this.roomsService.findAll(propertyId, orgId, query);
+  }
+
   @Get('rooms/:id')
   @ApiOperation({ summary: 'Get room details' })
   @ApiResponse({ status: 200, description: 'Room details' })
@@ -95,7 +108,9 @@ export class RoomsController {
   }
 
   @Get('properties/:propertyId/inventory-stats')
-  @ApiOperation({ summary: 'Get comprehensive 17-point inventory statistics for a property' })
+  @ApiOperation({
+    summary: 'Get comprehensive 17-point inventory statistics for a property',
+  })
   @ApiResponse({ status: 200, description: 'Inventory statistics' })
   async getInventoryStats(
     @Param('propertyId', new ParseUUIDPipe()) propertyId: string,

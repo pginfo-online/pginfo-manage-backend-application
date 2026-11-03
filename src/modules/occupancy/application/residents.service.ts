@@ -11,6 +11,10 @@ import type {
   QueryResidentsDto,
 } from '../api/dto/resident.dto.js';
 import { Prisma, ResidentStatus } from '@prisma/client';
+import {
+  dateKeyInTimeZone,
+  dateOnlyKey,
+} from '../../../common/time/property-date.js';
 
 @Injectable()
 export class ResidentsService {
@@ -53,12 +57,29 @@ export class ResidentsService {
       }
     }
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     const initialStatus: ResidentStatus =
-      dto.joiningDate > today ? 'PENDING_MOVE_IN' : 'ACTIVE';
+      dateOnlyKey(dto.joiningDate) >
+      dateKeyInTimeZone(new Date(), property.timezone)
+        ? 'PENDING_MOVE_IN'
+        : 'ACTIVE';
 
     return this.prisma.$transaction(async (tx) => {
+      if (dto.bedId) {
+        const claimed = await tx.bed.updateMany({
+          where: {
+            id: dto.bedId,
+            organizationId: orgId,
+            status: 'AVAILABLE',
+          },
+          data: {
+            status: initialStatus === 'ACTIVE' ? 'OCCUPIED' : 'RESERVED',
+          },
+        });
+        if (claimed.count !== 1) {
+          throw new ConflictError('The selected bed is no longer available');
+        }
+      }
+
       const resident = await tx.resident.create({
         data: {
           organizationId: orgId,
@@ -71,6 +92,11 @@ export class ResidentsService {
           mobile: dto.mobile,
           whatsappNumber: dto.whatsappNumber,
           emergencyContact: dto.emergencyContact,
+          permanentAddress: dto.permanentAddress,
+          parentName: dto.parentName,
+          parentPhone: dto.parentPhone,
+          idProofUrl: dto.idProofUrl,
+          agreementUrl: dto.agreementUrl,
           profession: dto.profession,
           status: initialStatus,
           monthlyRent: dto.monthlyRent,
@@ -85,16 +111,6 @@ export class ResidentsService {
           notes: dto.notes,
         },
       });
-
-      // Update bed status if assigned
-      if (dto.bedId) {
-        await tx.bed.update({
-          where: { id: dto.bedId },
-          data: {
-            status: initialStatus === 'ACTIVE' ? 'OCCUPIED' : 'RESERVED',
-          },
-        });
-      }
 
       // Record occupancy history
       if (dto.roomId) {

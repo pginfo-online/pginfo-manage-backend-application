@@ -154,6 +154,7 @@ model Property {
   country        String         @default("IN") @db.VarChar(2)
 
   // Contact
+  ownerName      String?        @map("owner_name")
   contactPhone   String?        @map("contact_phone")
   contactEmail   String?        @map("contact_email")
 
@@ -326,6 +327,11 @@ model Resident {
   mobile          String
   whatsappNumber  String?        @map("whatsapp_number")
   emergencyContact String?       @map("emergency_contact")
+  permanentAddress String?       @map("permanent_address")
+  parentName       String?       @map("parent_name")
+  parentPhone      String?       @map("parent_phone")
+  idProofUrl       String?       @map("id_proof_url")
+  agreementUrl     String?       @map("agreement_url")
   profession      Profession     @default(OTHER)
 
   // Tenancy

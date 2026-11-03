@@ -6,7 +6,10 @@ export const createLeadSchema = z.object({
   name: z.string().min(2, 'Name is required').trim(),
   mobile: z
     .string()
-    .regex(/^[6-9]\d{9}$/, 'Please enter a valid 10-digit Indian mobile number'),
+    .regex(
+      /^[6-9]\d{9}$/,
+      'Please enter a valid 10-digit Indian mobile number',
+    ),
   email: z.string().email().optional(),
   budget: z.coerce.number().int().positive().optional(),
   sharingPreference: z.string().optional(),

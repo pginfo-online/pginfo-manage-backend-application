@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
+import { buildOffsetResponse } from '../../../common/pagination/index.js';
+import type { ActivityQueryDto } from '../api/dto/activity.dto.js';
 
 @Injectable()
 export class DashboardService {
@@ -8,10 +10,39 @@ export class DashboardService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async getActivity(orgId: string, query: ActivityQueryDto) {
+    const where = {
+      organizationId: orgId,
+      entityType: query.entityType,
+      entityId: query.entityId,
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+        select: {
+          id: true,
+          action: true,
+          metadata: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+    return buildOffsetResponse(items, total, query.page, query.limit);
+  }
+
   /**
    * Aggregates organization-wide or property-specific operational & financial metrics.
    */
-  async getMetrics(orgId: string, propertyId?: string) {
+  async getMetrics(
+    orgId: string,
+    propertyId?: string,
+    month?: number,
+    year?: number,
+  ) {
     const propertyFilter = propertyId ? { id: propertyId } : {};
     const residentFilter = propertyId ? { propertyId } : {};
     const billingFilter = propertyId ? { propertyId } : {};
@@ -19,26 +50,52 @@ export class DashboardService {
     const complaintFilter = propertyId ? { propertyId } : {};
 
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const selectedMonth = month ?? now.getMonth() + 1;
+    const selectedYear = year ?? now.getFullYear();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      0,
+      0,
+      0,
+      0,
+    );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+      23,
+      59,
+      59,
+      999,
+    );
+    const monthStart = new Date(selectedYear, selectedMonth - 1, 1, 0, 0, 0, 0);
+    const monthEnd = new Date(selectedYear, selectedMonth, 0, 23, 59, 59, 999);
 
     const [
       propertiesCount,
       roomsCount,
       bedStats,
       activeResidentsCount,
+      periodMoveIns,
+      periodMoveOuts,
       pendingMoveIns,
       billingAggregates,
+      currentDuesAggregate,
+      futureDuesAggregate,
       monthBillingAggregate,
       paymentsAggregate,
       todayPaymentsAggregate,
       monthPaymentsAggregate,
       expensesAggregate,
+      monthExpensesAggregate,
       securityDepositsAggregate,
+      pendingDepositsAggregate,
       pendingComplaintsCount,
-    ] = await Promise.all([
+      periodComplaintsCreated,
+      periodComplaintsResolved,
+    ] = await this.prisma.$transaction([
       // Total properties
       this.prisma.property.count({
         where: { organizationId: orgId, status: 'ACTIVE', ...propertyFilter },
@@ -73,6 +130,22 @@ export class DashboardService {
         },
       }),
 
+      this.prisma.resident.count({
+        where: {
+          organizationId: orgId,
+          moveInDate: { gte: monthStart, lte: monthEnd },
+          ...residentFilter,
+        },
+      }),
+
+      this.prisma.resident.count({
+        where: {
+          organizationId: orgId,
+          moveOutDate: { gte: monthStart, lte: monthEnd },
+          ...residentFilter,
+        },
+      }),
+
       // Upcoming move-ins
       this.prisma.resident.count({
         where: {
@@ -95,6 +168,26 @@ export class DashboardService {
         },
       }),
 
+      this.prisma.billingRecord.aggregate({
+        where: {
+          organizationId: orgId,
+          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
+          dueDate: { lte: now },
+          ...billingFilter,
+        },
+        _sum: { amount: true, paidAmount: true },
+      }),
+
+      this.prisma.billingRecord.aggregate({
+        where: {
+          organizationId: orgId,
+          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID'] },
+          dueDate: { gt: now },
+          ...billingFilter,
+        },
+        _sum: { amount: true, paidAmount: true },
+      }),
+
       // Current Month Billed dues
       this.prisma.billingRecord.aggregate({
         where: {
@@ -105,6 +198,7 @@ export class DashboardService {
         },
         _sum: {
           amount: true,
+          paidAmount: true,
         },
       }),
 
@@ -149,6 +243,15 @@ export class DashboardService {
         _sum: { amount: true },
       }),
 
+      this.prisma.expense.aggregate({
+        where: {
+          organizationId: orgId,
+          ...expenseFilter,
+          expenseDate: { gte: monthStart, lte: monthEnd },
+        },
+        _sum: { amount: true },
+      }),
+
       // Security deposits currently held
       this.prisma.resident.aggregate({
         where: {
@@ -159,11 +262,38 @@ export class DashboardService {
         _sum: { securityDeposit: true },
       }),
 
+      this.prisma.billingRecord.aggregate({
+        where: {
+          organizationId: orgId,
+          type: 'SECURITY_DEPOSIT',
+          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
+          ...billingFilter,
+        },
+        _sum: { amount: true, paidAmount: true },
+      }),
+
       // Pending complaints
       this.prisma.complaint.count({
         where: {
           organizationId: orgId,
           status: { not: 'RESOLVED' },
+          ...complaintFilter,
+        },
+      }),
+
+      this.prisma.complaint.count({
+        where: {
+          organizationId: orgId,
+          createdAt: { gte: monthStart, lte: monthEnd },
+          ...complaintFilter,
+        },
+      }),
+
+      this.prisma.complaint.count({
+        where: {
+          organizationId: orgId,
+          status: 'RESOLVED',
+          updatedAt: { gte: monthStart, lte: monthEnd },
           ...complaintFilter,
         },
       }),
@@ -187,6 +317,10 @@ export class DashboardService {
 
     const totalBilled = billingAggregates._sum.amount ?? 0;
     const monthBilled = monthBillingAggregate._sum.amount ?? 0;
+    const monthOutstanding = Math.max(
+      0,
+      monthBilled - (monthBillingAggregate._sum.paidAmount ?? 0),
+    );
     const totalCollected = paymentsAggregate._sum.amount ?? 0;
     const todayCollected = todayPaymentsAggregate._sum.amount ?? 0;
     const monthCollected = monthPaymentsAggregate._sum.amount ?? 0;
@@ -195,11 +329,28 @@ export class DashboardService {
       totalBilled - (billingAggregates._sum.paidAmount ?? 0),
     );
     const totalExpenses = expensesAggregate._sum.amount ?? 0;
+    const monthExpenses = monthExpensesAggregate._sum.amount ?? 0;
     const netCashflow = totalCollected - totalExpenses;
     const securityDepositsHeld =
       securityDepositsAggregate._sum.securityDeposit ?? 0;
+    const pendingDeposits = Math.max(
+      0,
+      (pendingDepositsAggregate._sum.amount ?? 0) -
+        (pendingDepositsAggregate._sum.paidAmount ?? 0),
+    );
+    const currentDues = Math.max(
+      0,
+      (currentDuesAggregate._sum.amount ?? 0) -
+        (currentDuesAggregate._sum.paidAmount ?? 0),
+    );
+    const futureDues = Math.max(
+      0,
+      (futureDuesAggregate._sum.amount ?? 0) -
+        (futureDuesAggregate._sum.paidAmount ?? 0),
+    );
 
     return {
+      period: { month: selectedMonth, year: selectedYear },
       operational: {
         totalProperties: propertiesCount,
         totalRooms: roomsCount,
@@ -209,7 +360,11 @@ export class DashboardService {
         occupancyRate,
         currentResidents: activeResidentsCount,
         upcomingMoveIns: pendingMoveIns,
+        periodMoveIns,
+        periodMoveOuts,
         pendingComplaints: pendingComplaintsCount,
+        periodComplaintsCreated,
+        periodComplaintsResolved,
       },
       financial: {
         todayCollectedPaise: todayCollected,
@@ -218,6 +373,8 @@ export class DashboardService {
         monthCollectedFormatted: Monetary.formatINR(monthCollected),
         monthBilledPaise: monthBilled,
         monthBilledFormatted: Monetary.formatINR(monthBilled),
+        monthOutstandingPaise: monthOutstanding,
+        monthOutstandingFormatted: Monetary.formatINR(monthOutstanding),
         totalBilledPaise: totalBilled,
         totalBilledFormatted: Monetary.formatINR(totalBilled),
         totalCollectedPaise: totalCollected,
@@ -226,10 +383,18 @@ export class DashboardService {
         outstandingBalanceFormatted: Monetary.formatINR(totalOutstanding),
         totalExpensesPaise: totalExpenses,
         totalExpensesFormatted: Monetary.formatINR(totalExpenses),
+        monthExpensesPaise: monthExpenses,
+        monthExpensesFormatted: Monetary.formatINR(monthExpenses),
         netCashflowPaise: netCashflow,
         netCashflowFormatted: Monetary.formatINR(netCashflow),
         securityDepositsHeldPaise: securityDepositsHeld,
         securityDepositsHeldFormatted: Monetary.formatINR(securityDepositsHeld),
+        pendingDepositsPaise: pendingDeposits,
+        pendingDepositsFormatted: Monetary.formatINR(pendingDeposits),
+        currentDuesPaise: currentDues,
+        currentDuesFormatted: Monetary.formatINR(currentDues),
+        futureDuesPaise: futureDues,
+        futureDuesFormatted: Monetary.formatINR(futureDues),
       },
     };
   }
