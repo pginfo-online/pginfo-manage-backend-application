@@ -285,10 +285,11 @@ export class AnnouncementsService {
 
       if (
         (dto.channel === 'WHATSAPP' || dto.channel === 'BOTH') &&
-        resident.mobile
+        resident.sendWhatsappReminder &&
+        (resident.whatsappNumber || resident.mobile)
       ) {
         await this.whatsappAdapter.send({
-          to: resident.mobile,
+          to: resident.whatsappNumber || resident.mobile,
           message: reminderMessage,
         });
       }

@@ -27,22 +27,22 @@ export class RoomsService {
     orgId: string,
     userId: string,
   ) {
-    const property = await this.prisma.property.findFirst({
-      where: { id: propertyId, organizationId: orgId },
-    });
+    const [property, existing] = await Promise.all([
+      this.prisma.property.findFirst({
+        where: { id: propertyId, organizationId: orgId },
+        select: { id: true },
+      }),
+      this.prisma.room.findUnique({
+        where: {
+          propertyId_roomNumber: { propertyId, roomNumber: dto.roomNumber },
+        },
+        select: { id: true },
+      }),
+    ]);
 
     if (!property) {
       throw new NotFoundError('Property', propertyId);
     }
-
-    const existing = await this.prisma.room.findUnique({
-      where: {
-        propertyId_roomNumber: {
-          propertyId,
-          roomNumber: dto.roomNumber,
-        },
-      },
-    });
 
     if (existing) {
       throw new ConflictError(
@@ -96,6 +96,8 @@ export class RoomsService {
               })
             : [];
 
+      let createdBeds: Awaited<ReturnType<typeof tx.bed.createManyAndReturn>> =
+        [];
       if (bedNames.length > 0) {
         const bedsData = bedNames.map((name) => ({
           roomId: room.id,
@@ -106,7 +108,7 @@ export class RoomsService {
             dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
         }));
 
-        await tx.bed.createMany({ data: bedsData });
+        createdBeds = await tx.bed.createManyAndReturn({ data: bedsData });
       }
 
       await tx.auditLog.create({
@@ -119,10 +121,7 @@ export class RoomsService {
         },
       });
 
-      return tx.room.findUnique({
-        where: { id: room.id },
-        include: { beds: true },
-      });
+      return { ...room, beds: createdBeds };
     });
   }
 
@@ -132,6 +131,7 @@ export class RoomsService {
   async findAll(propertyId: string, orgId: string, query?: QueryRoomsDto) {
     const property = await this.prisma.property.findFirst({
       where: { id: propertyId, organizationId: orgId },
+      select: { id: true },
     });
 
     if (!property) {
@@ -143,6 +143,9 @@ export class RoomsService {
       status: query?.status ?? { not: 'ARCHIVED' },
       ...(query?.sharingType ? { sharingType: query.sharingType } : {}),
       ...(query?.gender ? { gender: query.gender } : {}),
+      ...(query?.floor ? { floor: query.floor } : {}),
+      ...(query?.unitType ? { unitType: query.unitType } : {}),
+      ...(query?.published ? { isPublished: query.published === 'true' } : {}),
       ...(query?.search
         ? { roomNumber: { contains: query.search, mode: 'insensitive' } }
         : {}),
@@ -166,32 +169,7 @@ export class RoomsService {
         include: {
           beds: {
             where: { status: { not: 'ARCHIVED' } },
-            include: {
-              residents: {
-                where: {
-                  status: {
-                    in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
-                  },
-                },
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  status: true,
-                  mobile: true,
-                },
-              },
-              bookings: {
-                where: { status: { in: ['CONFIRMED'] } },
-                select: {
-                  id: true,
-                  guestName: true,
-                  guestMobile: true,
-                  expectedMoveIn: true,
-                  status: true,
-                },
-              },
-            },
+            select: { id: true, bedNumber: true, status: true },
             orderBy: { bedNumber: 'asc' },
           },
         },

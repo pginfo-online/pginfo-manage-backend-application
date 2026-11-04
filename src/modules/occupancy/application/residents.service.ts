@@ -26,35 +26,61 @@ export class ResidentsService {
    * Onboards a new resident and allocates room/bed in an atomic transaction.
    */
   async create(dto: CreateResidentDto, orgId: string, userId: string) {
-    const property = await this.prisma.property.findFirst({
-      where: { id: dto.propertyId, organizationId: orgId },
-    });
+    const [property, room, bed] = await Promise.all([
+      this.prisma.property.findFirst({
+        where: { id: dto.propertyId, organizationId: orgId },
+        select: { id: true, timezone: true, rentDueDay: true },
+      }),
+      dto.roomId
+        ? this.prisma.room.findFirst({
+            where: {
+              id: dto.roomId,
+              propertyId: dto.propertyId,
+              organizationId: orgId,
+              status: { not: 'ARCHIVED' },
+            },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+      dto.bedId
+        ? this.prisma.bed.findFirst({
+            where: {
+              id: dto.bedId,
+              organizationId: orgId,
+              room: { propertyId: dto.propertyId },
+            },
+            select: {
+              id: true,
+              roomId: true,
+              bedNumber: true,
+              residents: {
+                where: {
+                  status: {
+                    in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                  },
+                },
+                select: { firstName: true },
+              },
+            },
+          })
+        : Promise.resolve(null),
+    ]);
 
     if (!property) {
       throw new NotFoundError('Property', dto.propertyId);
     }
 
-    if (dto.bedId) {
-      const bed = await this.prisma.bed.findFirst({
-        where: { id: dto.bedId, organizationId: orgId },
-        include: {
-          residents: {
-            where: {
-              status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
-            },
-          },
-        },
-      });
-
-      if (!bed) {
-        throw new NotFoundError('Bed', dto.bedId);
-      }
-
-      if (bed.residents.length > 0) {
-        throw new ConflictError(
-          `Bed ${bed.bedNumber} is already occupied by ${bed.residents[0]?.firstName}`,
-        );
-      }
+    if (dto.roomId && !room) throw new NotFoundError('Room', dto.roomId);
+    if (dto.bedId && !bed) throw new NotFoundError('Bed', dto.bedId);
+    if (bed && bed.roomId !== dto.roomId) {
+      throw new ConflictError(
+        'Selected bed does not belong to the selected room',
+      );
+    }
+    if (bed && bed.residents.length > 0) {
+      throw new ConflictError(
+        `Bed ${bed.bedNumber} is already occupied by ${bed.residents[0]?.firstName}`,
+      );
     }
 
     const initialStatus: ResidentStatus =
@@ -91,6 +117,8 @@ export class ResidentsService {
           email: dto.email,
           mobile: dto.mobile,
           whatsappNumber: dto.whatsappNumber,
+          alternatePhone: dto.alternatePhone,
+          sendWhatsappReminder: dto.sendWhatsappReminder,
           emergencyContact: dto.emergencyContact,
           permanentAddress: dto.permanentAddress,
           parentName: dto.parentName,
@@ -98,6 +126,10 @@ export class ResidentsService {
           idProofUrl: dto.idProofUrl,
           agreementUrl: dto.agreementUrl,
           profession: dto.profession,
+          stayType: dto.stayType,
+          tenantType: dto.tenantType,
+          noticePeriodDays: dto.noticePeriodDays,
+          agreementPeriodMonths: dto.agreementPeriodMonths,
           status: initialStatus,
           monthlyRent: dto.monthlyRent,
           securityDeposit: dto.securityDeposit,
@@ -143,6 +175,47 @@ export class ResidentsService {
             idempotencyKey: `dep_${resident.id}`,
           },
         });
+      }
+
+      for (const opening of dto.openingBalances ?? []) {
+        const due =
+          opening.amount > 0
+            ? await tx.billingRecord.create({
+                data: {
+                  organizationId: orgId,
+                  residentId: resident.id,
+                  propertyId: dto.propertyId,
+                  type: opening.type,
+                  amount: opening.amount,
+                  paidAmount: opening.collectedAmount,
+                  status:
+                    opening.collectedAmount === opening.amount
+                      ? 'PAID'
+                      : opening.collectedAmount > 0
+                        ? 'PARTIALLY_PAID'
+                        : 'ISSUED',
+                  dueDate: opening.dueDate,
+                  periodEnd: opening.dueEndDate,
+                  attachmentUrls: opening.attachmentUrls,
+                  description: opening.description,
+                },
+              })
+            : null;
+        if (opening.collectedAmount > 0) {
+          await tx.payment.create({
+            data: {
+              organizationId: orgId,
+              residentId: resident.id,
+              billingRecordId: due?.id,
+              amount: opening.collectedAmount,
+              status: 'CONFIRMED',
+              mode: opening.collectionMode,
+              collectionDate: opening.collectionDate ?? dto.joiningDate,
+              recordedBy: userId,
+              notes: opening.description ?? 'Opening balance collection',
+            },
+          });
+        }
       }
 
       // Update room status

@@ -9,11 +9,19 @@ describe('DashboardService & ExportService', () => {
 
   beforeEach(() => {
     mockPrisma = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ count: 2n }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ recent: 1n, week: 2n, older: 3n }]),
       $transaction: vi.fn((operations: Promise<unknown>[]) =>
         Promise.all(operations),
       ),
       property: {
         count: vi.fn().mockResolvedValue(2),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 'p1', name: 'A', type: 'PG' }]),
       },
       room: {
         count: vi.fn().mockResolvedValue(10),
@@ -26,6 +34,10 @@ describe('DashboardService & ExportService', () => {
       },
       resident: {
         count: vi.fn().mockResolvedValue(15),
+        groupBy: vi.fn().mockResolvedValue([
+          { status: 'ACTIVE', _count: 12 },
+          { status: 'NOTICE_PERIOD', _count: 3 },
+        ]),
         aggregate: vi.fn().mockResolvedValue({
           _sum: { securityDeposit: 15000000 },
         }),
@@ -80,6 +92,12 @@ describe('DashboardService & ExportService', () => {
       complaint: {
         count: vi.fn().mockResolvedValue(3),
       },
+      booking: {
+        groupBy: vi
+          .fn()
+          .mockResolvedValue([{ status: 'CONFIRMED', _count: 4 }]),
+      },
+      lead: { count: vi.fn().mockResolvedValue(5) },
     };
 
     dashboardService = new DashboardService(mockPrisma as any);
@@ -98,6 +116,10 @@ describe('DashboardService & ExportService', () => {
     expect(metrics.operational.occupancyRate).toBe(75);
     expect(metrics.operational.currentResidents).toBe(15);
     expect(metrics.operational.pendingComplaints).toBe(3);
+    expect(metrics.operational.activeTenants).toBe(15);
+    expect(metrics.operational.currentBookings).toBe(4);
+    expect(metrics.operational.activeLeads).toBe(5);
+    expect(metrics.operational.rentDefaulters).toBe(2);
 
     // Financial (1 INR = 100 paise)
     expect(metrics.financial.totalBilledPaise).toBe(12000000); // 1,20,000 INR
@@ -105,6 +127,23 @@ describe('DashboardService & ExportService', () => {
     expect(metrics.financial.outstandingBalancePaise).toBe(2000000); // 20,000 INR
     expect(metrics.financial.totalExpensesPaise).toBe(3000000); // 30,000 INR
     expect(metrics.financial.netCashflowPaise).toBe(7000000); // 70,000 INR
+    await dashboardService.getMetrics('org-1');
+    expect(mockPrisma.property.count).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists dashboard properties without loading nested inventory', async () => {
+    const result = await dashboardService.getProperties('org-1', {
+      search: 'A',
+      page: 1,
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.hasMore).toBe(false);
+    expect(mockPrisma.property.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: { id: true, name: true, type: true },
+        take: 21,
+      }),
+    );
   });
 
   it('exportCollectionsCsv should return valid CSV headers and data rows', async () => {

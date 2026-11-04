@@ -1,5 +1,36 @@
 import { z } from 'zod';
-import { ResidentStatus, Profession } from '@prisma/client';
+import {
+  ResidentStatus,
+  Profession,
+  BillingType,
+  PaymentMode,
+} from '@prisma/client';
+
+const dateOnly = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .transform((value) => new Date(value));
+const openingBalanceSchema = z
+  .object({
+    type: z.nativeEnum(BillingType).default('OTHER'),
+    amount: z.number().int().min(0),
+    dueDate: dateOnly,
+    dueEndDate: dateOnly.optional(),
+    attachmentUrls: z.array(z.string().url()).max(5).default([]),
+    description: z.string().trim().max(500).optional(),
+    collectedAmount: z.number().int().min(0).default(0),
+    collectionDate: dateOnly.optional(),
+    collectionMode: z.nativeEnum(PaymentMode).default('OTHER'),
+  })
+  .refine((value) => value.amount > 0 || value.collectedAmount > 0, {
+    message: 'Enter a due or collection amount',
+  })
+  .refine(
+    (value) => value.amount === 0 || value.collectedAmount <= value.amount,
+    {
+      message: 'Collection cannot exceed this due',
+    },
+  );
 
 export const createResidentSchema = z.object({
   propertyId: z.string().uuid(),
@@ -18,6 +49,11 @@ export const createResidentSchema = z.object({
     .string()
     .regex(/^[6-9]\d{9}$/)
     .optional(),
+  alternatePhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/)
+    .optional(),
+  sendWhatsappReminder: z.boolean().optional(),
   emergencyContact: z.string().optional(),
   permanentAddress: z.string().trim().optional(),
   parentName: z.string().trim().optional(),
@@ -28,6 +64,21 @@ export const createResidentSchema = z.object({
   idProofUrl: z.string().url().optional(),
   agreementUrl: z.string().url().optional(),
   profession: z.nativeEnum(Profession).default('OTHER'),
+  stayType: z.enum(['LONG_TERM', 'SHORT_TERM']).optional(),
+  tenantType: z
+    .enum([
+      'STUDENT',
+      'PROFESSIONAL',
+      'BACHELOR',
+      'FAMILY',
+      'COUPLE',
+      'STAFF',
+      'OTHER',
+    ])
+    .optional(),
+  noticePeriodDays: z.number().int().min(0).max(365).optional(),
+  agreementPeriodMonths: z.number().int().min(1).max(120).optional(),
+  openingBalances: z.array(openingBalanceSchema).max(20).optional(),
   monthlyRent: z.coerce
     .number()
     .int()
@@ -70,6 +121,25 @@ export const updateResidentSchema = z.object({
     .string()
     .regex(/^[6-9]\d{9}$/)
     .optional(),
+  alternatePhone: z
+    .string()
+    .regex(/^[6-9]\d{9}$/)
+    .optional(),
+  sendWhatsappReminder: z.boolean().optional(),
+  stayType: z.enum(['LONG_TERM', 'SHORT_TERM']).optional(),
+  tenantType: z
+    .enum([
+      'STUDENT',
+      'PROFESSIONAL',
+      'BACHELOR',
+      'FAMILY',
+      'COUPLE',
+      'STAFF',
+      'OTHER',
+    ])
+    .optional(),
+  noticePeriodDays: z.number().int().min(0).max(365).optional(),
+  agreementPeriodMonths: z.number().int().min(1).max(120).optional(),
   emergencyContact: z.string().optional(),
   permanentAddress: z.string().trim().optional(),
   parentName: z.string().trim().optional(),

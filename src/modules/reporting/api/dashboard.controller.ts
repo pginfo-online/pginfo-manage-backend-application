@@ -1,4 +1,11 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -17,7 +24,9 @@ import {
 import { ZodValidationPipe } from '../../../common/validation/index.js';
 import {
   dashboardQuerySchema,
+  dashboardPropertiesQuerySchema,
   type DashboardQueryDto,
+  type DashboardPropertiesQueryDto,
 } from './dto/dashboard.dto.js';
 import {
   activityQuerySchema,
@@ -30,6 +39,27 @@ import {
 @ApiBearerAuth('JWT')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
+
+  @Get('properties')
+  @ApiOperation({
+    summary: 'List lightweight property labels for dashboard cards',
+  })
+  async getProperties(
+    @CurrentOrgId() orgId: string,
+    @Query(new ZodValidationPipe(dashboardPropertiesQuerySchema))
+    query: DashboardPropertiesQueryDto,
+  ) {
+    return this.dashboardService.getProperties(orgId, query);
+  }
+
+  @Get('properties/:id')
+  @ApiOperation({ summary: 'Get a property label for dashboard header' })
+  async getPropertyLabel(
+    @CurrentOrgId() orgId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.dashboardService.getPropertyLabel(orgId, id);
+  }
 
   @Get('metrics')
   @ApiOperation({
@@ -47,6 +77,7 @@ export class DashboardController {
       query.propertyId,
       query.month,
       query.year,
+      query.fy === 'true',
     );
   }
 

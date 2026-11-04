@@ -37,6 +37,7 @@ describe('AnnouncementsService', () => {
             resident: {
               firstName: 'Aarav',
               mobile: '9876543210',
+              sendWhatsappReminder: true,
               email: 'aarav@test.com',
               property: { name: 'Sunshine PG' },
             },
@@ -91,6 +92,14 @@ describe('AnnouncementsService', () => {
     expect(result.remindersSent).toBe(1);
     expect(result.totalRemindedPaise).toBe(800000);
     expect(mockWhatsApp.send).toHaveBeenCalled();
+    expect(mockEmail.send).toHaveBeenCalled();
+  });
+
+  it('honors a tenant opting out of WhatsApp rent reminders', async () => {
+    const bills = await mockPrisma.billingRecord.findMany();
+    bills[0].resident.sendWhatsappReminder = false;
+    await service.sendRentReminders({ channel: 'BOTH' }, 'org-1', 'user-1');
+    expect(mockWhatsApp.send).not.toHaveBeenCalled();
     expect(mockEmail.send).toHaveBeenCalled();
   });
 });

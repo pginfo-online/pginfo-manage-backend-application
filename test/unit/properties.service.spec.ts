@@ -22,6 +22,11 @@ describe('PropertiesService', () => {
           { status: 'AVAILABLE', _count: 6 },
         ]),
       },
+      room: { groupBy: vi.fn() },
+      resident: { groupBy: vi.fn() },
+      booking: { groupBy: vi.fn() },
+      billingRecord: { groupBy: vi.fn() },
+      $queryRaw: vi.fn(),
       auditLog: {
         create: vi.fn(),
       },
@@ -75,6 +80,36 @@ describe('PropertiesService', () => {
     expect(result.stats.occupiedBeds).toBe(4);
     expect(result.stats.availableBeds).toBe(6);
     expect(result.stats.occupancyRate).toBe(40);
+  });
+
+  it('aggregates property list counts without loading every room and bed', async () => {
+    mockPrisma.property.count.mockResolvedValue(1);
+    mockPrisma.property.findMany.mockResolvedValue([
+      { id: 'prop-1', name: 'Sunrise PG' },
+    ]);
+    mockPrisma.room.groupBy.mockResolvedValue([
+      { propertyId: 'prop-1', _count: 2 },
+    ]);
+    mockPrisma.$queryRaw.mockResolvedValue([
+      { propertyId: 'prop-1', status: 'OCCUPIED', count: 1 },
+      { propertyId: 'prop-1', status: 'AVAILABLE', count: 3 },
+    ]);
+    mockPrisma.resident.groupBy.mockResolvedValue([
+      { propertyId: 'prop-1', _count: 1 },
+    ]);
+    mockPrisma.booking.groupBy.mockResolvedValue([]);
+    mockPrisma.billingRecord.groupBy.mockResolvedValue([]);
+
+    const page = await service.findAll('org-1', { page: 1, limit: 20 });
+    expect(page.data[0]).toMatchObject({
+      roomCount: 2,
+      totalBeds: 4,
+      occupiedBeds: 1,
+      vacantBeds: 3,
+      activeTenants: 1,
+    });
+    expect(mockPrisma.room.groupBy).toHaveBeenCalledOnce();
+    expect(mockPrisma.bed.groupBy).not.toHaveBeenCalled();
   });
 
   it('should throw NotFoundError if property does not belong to organization', async () => {

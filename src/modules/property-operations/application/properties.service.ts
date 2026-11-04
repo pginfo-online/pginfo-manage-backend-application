@@ -87,46 +87,90 @@ export class PropertiesService {
         skip: (query.page - 1) * query.limit,
         take: query.limit,
         orderBy: { createdAt: 'desc' },
-        include: {
-          rooms: {
-            where: { status: { not: 'ARCHIVED' } },
-            include: {
-              beds: {
-                where: { status: { not: 'ARCHIVED' } },
-                select: { id: true, status: true },
-              },
-            },
-          },
-          residents: {
-            where: {
-              status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
-            },
-            select: { id: true, status: true },
-          },
-          bookings: {
-            where: { status: 'CONFIRMED' },
-            select: { id: true },
-          },
-        },
       }),
     ]);
 
     const propertyIds = properties.map((p) => p.id);
-    const unpaidDuesByProperty =
+    const [
+      roomsByProperty,
+      bedsByPropertyStatus,
+      residentsByProperty,
+      bookingsByProperty,
+      unpaidDuesByProperty,
+    ] =
       propertyIds.length > 0
-        ? await this.prisma.billingRecord.groupBy({
-            by: ['propertyId'],
-            where: {
-              propertyId: { in: propertyIds },
-              organizationId: orgId,
-              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
-            },
-            _sum: {
-              amount: true,
-              paidAmount: true,
-            },
-          })
-        : [];
+        ? await Promise.all([
+            this.prisma.room.groupBy({
+              by: ['propertyId'],
+              where: {
+                organizationId: orgId,
+                propertyId: { in: propertyIds },
+                status: { not: 'ARCHIVED' },
+              },
+              _count: true,
+            }),
+            this.prisma.$queryRaw<
+              Array<{ propertyId: string; status: string; count: number }>
+            >`
+              SELECT r.property_id AS "propertyId", b.status::text AS status, COUNT(*)::integer AS count
+              FROM beds b JOIN rooms r ON r.id = b.room_id
+              WHERE r.organization_id = ${orgId}::uuid
+                AND b.organization_id = ${orgId}::uuid
+                AND r.property_id IN (${Prisma.join(propertyIds.map((id) => Prisma.sql`${id}::uuid`))})
+                AND r.status <> 'ARCHIVED'
+                AND b.status <> 'ARCHIVED'
+              GROUP BY r.property_id, b.status
+            `,
+            this.prisma.resident.groupBy({
+              by: ['propertyId'],
+              where: {
+                organizationId: orgId,
+                propertyId: { in: propertyIds },
+                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+              },
+              _count: true,
+            }),
+            this.prisma.booking.groupBy({
+              by: ['propertyId'],
+              where: {
+                organizationId: orgId,
+                propertyId: { in: propertyIds },
+                status: 'CONFIRMED',
+              },
+              _count: true,
+            }),
+            this.prisma.billingRecord.groupBy({
+              by: ['propertyId'],
+              where: {
+                propertyId: { in: propertyIds },
+                organizationId: orgId,
+                status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+              },
+              _sum: {
+                amount: true,
+                paidAmount: true,
+              },
+            }),
+          ])
+        : ([[], [], [], [], []] as const);
+
+    const roomCount = new Map(
+      roomsByProperty.map((item) => [item.propertyId, item._count]),
+    );
+    const bedsByProperty = new Map<
+      string,
+      { total: number; occupied: number }
+    >();
+    for (const stat of bedsByPropertyStatus) {
+      const counts = bedsByProperty.get(stat.propertyId) ?? {
+        total: 0,
+        occupied: 0,
+      };
+      counts.total += stat.count;
+      if (stat.status === 'OCCUPIED' || stat.status === 'RESERVED')
+        counts.occupied += stat.count;
+      bedsByProperty.set(stat.propertyId, counts);
+    }
 
     const propertyDuesMap = new Map<string, number>();
     for (const rec of unpaidDuesByProperty) {
@@ -136,29 +180,21 @@ export class PropertiesService {
     }
 
     const formatted = properties.map((p) => {
-      const roomCount = p.rooms.length;
-      const allBeds = p.rooms.flatMap((r) => r.beds);
-      const totalBeds = allBeds.length;
-      const occupiedBeds = allBeds.filter(
-        (b) => b.status === 'OCCUPIED' || b.status === 'RESERVED',
-      ).length;
+      const roomsCount = roomCount.get(p.id) ?? 0;
+      const totalBeds = bedsByProperty.get(p.id)?.total ?? 0;
+      const occupiedBeds = bedsByProperty.get(p.id)?.occupied ?? 0;
       const vacantBeds = Math.max(0, totalBeds - occupiedBeds);
-      const activeTenants = p.residents.length;
-      const bookingsCount = p.bookings.length;
+      const activeTenants =
+        residentsByProperty.find((r) => r.propertyId === p.id)?._count ?? 0;
+      const bookingsCount =
+        bookingsByProperty.find((r) => r.propertyId === p.id)?._count ?? 0;
       const pendingDuesPaise = propertyDuesMap.get(p.id) ?? 0;
 
-      const {
-        rooms: _rooms,
-        residents: _residents,
-        bookings: _bookings,
-        ...rest
-      } = p;
-
       return {
-        ...rest,
-        roomCount,
-        roomsCount: roomCount,
-        totalRooms: roomCount,
+        ...p,
+        roomCount: roomsCount,
+        roomsCount,
+        totalRooms: roomsCount,
         totalBeds,
         occupiedBeds,
         vacantBeds,

@@ -19,6 +19,7 @@ describe('ResidentsService', () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       room: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'room-1' }),
         update: vi.fn(),
       },
       resident: {
@@ -46,6 +47,7 @@ describe('ResidentsService', () => {
       auditLog: {
         create: vi.fn(),
       },
+      payment: { create: vi.fn() },
       $transaction: vi.fn().mockImplementation((cb) => cb(mockPrisma)),
     };
 
@@ -56,6 +58,7 @@ describe('ResidentsService', () => {
     mockPrisma.property.findFirst.mockResolvedValue({ id: 'prop-1' });
     mockPrisma.bed.findFirst.mockResolvedValue({
       id: 'bed-1',
+      roomId: 'room-1',
       bedNumber: 'A',
       residents: [{ id: 'res-other', firstName: 'Rahul', status: 'ACTIVE' }],
     });
@@ -77,6 +80,61 @@ describe('ResidentsService', () => {
         'user-1',
       ),
     ).rejects.toThrow(ConflictError);
+  });
+
+  it('creates opening dues and collections in the resident transaction', async () => {
+    mockPrisma.property.findFirst.mockResolvedValue({
+      id: 'prop-1',
+      timezone: 'Asia/Kolkata',
+      rentDueDay: 1,
+    });
+    mockPrisma.resident.create.mockResolvedValue({ id: 'resident-1' });
+    mockPrisma.billingRecord.create.mockResolvedValue({ id: 'bill-1' });
+    mockPrisma.payment.create.mockResolvedValue({ id: 'payment-1' });
+
+    await service.create(
+      {
+        propertyId: 'prop-1',
+        firstName: 'Ankit',
+        mobile: '9876543210',
+        monthlyRent: 800000,
+        securityDeposit: 0,
+        joiningDate: new Date('2026-11-01'),
+        profession: 'STUDENT',
+        openingBalances: [
+          {
+            type: 'OTHER',
+            amount: 120000,
+            collectedAmount: 20000,
+            dueDate: new Date('2026-11-01'),
+            attachmentUrls: [],
+            collectionMode: 'CASH',
+          },
+        ],
+      },
+      'org-1',
+      'user-1',
+    );
+
+    expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
+    expect(mockPrisma.billingRecord.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          amount: 120000,
+          paidAmount: 20000,
+          status: 'PARTIALLY_PAID',
+        }),
+      }),
+    );
+    expect(mockPrisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          billingRecordId: 'bill-1',
+          amount: 20000,
+          status: 'CONFIRMED',
+        }),
+      }),
+    );
   });
 
   it('should compute financial summary accurately for a resident', async () => {

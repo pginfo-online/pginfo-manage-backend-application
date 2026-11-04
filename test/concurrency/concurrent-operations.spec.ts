@@ -25,6 +25,7 @@ describe('Concurrency & Race Condition Defenses', () => {
         findMany: vi.fn().mockResolvedValue([]),
       },
       room: {
+        findFirst: vi.fn().mockResolvedValue({ id: 'room-1' }),
         update: vi.fn(),
       },
       resident: {
@@ -55,6 +56,7 @@ describe('Concurrency & Race Condition Defenses', () => {
   it('Concurrent Bed Allocation: Prevents double allocation of the same bed', async () => {
     mockPrisma.bed.findFirst.mockResolvedValue({
       id: 'bed-1',
+      roomId: 'room-1',
       bedNumber: 'A',
       residents: [],
     });

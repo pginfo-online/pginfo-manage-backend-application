@@ -333,6 +333,7 @@ enum SharingType {
   SEVEN_SHARING
   EIGHT_SHARING
   NINE_SHARING
+  TEN_SHARING
 
   @@map("sharing_type")
 }
@@ -372,6 +373,7 @@ model Room {
   @@index([organizationId])
   @@index([propertyId])
   @@index([status])
+  @@index([organizationId, propertyId, status, floor, roomNumber], map: "property_rooms_org_property_status_floor_idx")
   @@map("rooms")
 }
 
@@ -405,6 +407,7 @@ model Bed {
 
   @@unique([roomId, bedNumber]) // Bed numbers unique within room
   @@index([organizationId])
+  @@index([organizationId, roomId, status], map: "property_beds_org_room_status_idx")
   @@map("beds")
 }
 
@@ -439,29 +442,35 @@ model Resident {
   bedId          String? @map("bed_id") @db.Uuid
 
   // Personal info
-  firstName        String     @map("first_name")
-  lastName         String?    @map("last_name")
-  email            String?
-  mobile           String
-  whatsappNumber   String?    @map("whatsapp_number")
-  emergencyContact String?    @map("emergency_contact")
-  permanentAddress String?    @map("permanent_address")
-  parentName       String?    @map("parent_name")
-  parentPhone      String?    @map("parent_phone")
-  idProofUrl       String?    @map("id_proof_url")
-  agreementUrl     String?    @map("agreement_url")
-  profession       Profession @default(OTHER)
+  firstName            String     @map("first_name")
+  lastName             String?    @map("last_name")
+  email                String?
+  mobile               String
+  whatsappNumber       String?    @map("whatsapp_number")
+  alternatePhone       String?    @map("alternate_phone")
+  sendWhatsappReminder Boolean    @default(true) @map("send_whatsapp_reminder")
+  emergencyContact     String?    @map("emergency_contact")
+  permanentAddress     String?    @map("permanent_address")
+  parentName           String?    @map("parent_name")
+  parentPhone          String?    @map("parent_phone")
+  idProofUrl           String?    @map("id_proof_url")
+  agreementUrl         String?    @map("agreement_url")
+  profession           Profession @default(OTHER)
 
   // Tenancy
-  status               ResidentStatus @default(PENDING_MOVE_IN)
-  monthlyRent          Int            @map("monthly_rent") // paise
-  securityDeposit      Int            @default(0) @map("security_deposit") // paise
-  joiningDate          DateTime       @map("joining_date") @db.Date
-  moveInDate           DateTime?      @map("move_in_date") @db.Date
-  moveOutDate          DateTime?      @map("move_out_date") @db.Date
-  expectedVacatingDate DateTime?      @map("expected_vacating_date") @db.Date
-  lockInEndDate        DateTime?      @map("lock_in_end_date") @db.Date
-  rentDueDay           Int?           @map("rent_due_day") // Override property default
+  status                ResidentStatus @default(PENDING_MOVE_IN)
+  stayType              String         @default("LONG_TERM") @map("stay_type")
+  tenantType            String         @default("OTHER") @map("tenant_type")
+  noticePeriodDays      Int?           @map("notice_period_days")
+  agreementPeriodMonths Int?           @map("agreement_period_months")
+  monthlyRent           Int            @map("monthly_rent") // paise
+  securityDeposit       Int            @default(0) @map("security_deposit") // paise
+  joiningDate           DateTime       @map("joining_date") @db.Date
+  moveInDate            DateTime?      @map("move_in_date") @db.Date
+  moveOutDate           DateTime?      @map("move_out_date") @db.Date
+  expectedVacatingDate  DateTime?      @map("expected_vacating_date") @db.Date
+  lockInEndDate         DateTime?      @map("lock_in_end_date") @db.Date
+  rentDueDay            Int?           @map("rent_due_day") // Override property default
 
   // Metadata
   notes   String?
@@ -544,9 +553,10 @@ model BillingRecord {
   residentId     String @map("resident_id") @db.Uuid
   propertyId     String @map("property_id") @db.Uuid
 
-  type        BillingType
-  status      BillingStatus @default(ISSUED)
-  description String?
+  type           BillingType
+  status         BillingStatus @default(ISSUED)
+  description    String?
+  attachmentUrls String[]      @default([]) @map("attachment_urls")
 
   // Amounts in paise
   amount        Int // Total billed amount
@@ -987,6 +997,7 @@ model Booking {
   @@index([organizationId])
   @@index([propertyId])
   @@index([status])
+  @@index([organizationId, propertyId, status], map: "property_bookings_org_property_status_idx")
   @@map("bookings")
 }
 
