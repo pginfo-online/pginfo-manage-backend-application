@@ -1,4 +1,4 @@
-# PgInfo API testing guide (Postman)
+# PgInfo APIS testing guide (Postman)
 
 This guide covers the HTTP endpoints currently exposed by the backend and explains how to exercise them with Postman. For the complete machine-readable endpoint and schema reference, start the API and import its OpenAPI document as described below.
 
@@ -18,6 +18,12 @@ The local API base URL is:
 ```text
 http://localhost:3000
 ```
+
+`localhost` is reachable only from the computer running the API. To call the API
+from a phone on the same Wi-Fi network, use the computer's LAN IP instead (for
+example, `http://192.168.1.105:3000`) and check
+`http://192.168.1.105:3000/health/live`. The `/api/v1` prefix itself is not a
+health or root endpoint, so `GET /api/v1` may correctly return 404.
 
 The API prefix defaults to `/api/v1`. It can be changed with `API_PREFIX` in `.env`.
 
@@ -52,6 +58,9 @@ Create a Postman environment with these variables:
 | `paymentId` | *(empty initially)* | Payment UUID |
 | `complaintId` | *(empty initially)* | Complaint UUID |
 | `announcementId` | *(empty initially)* | Announcement UUID |
+
+When testing from a phone, set `baseUrl` to the computer's LAN address instead
+of `localhost`.
 
 Use `{{baseUrl}}{{apiPrefix}}` at the start of API request URLs. For example:
 

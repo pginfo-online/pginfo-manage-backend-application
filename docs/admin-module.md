@@ -98,13 +98,29 @@ Swagger documents these routes at `/api/docs` outside production.
 
 ## Bootstrap and deployment
 
+For initial setup in a trusted terminal, provision an admin interactively when
+no platform administrator exists and the admin email is not registered. The
+password is entered without terminal echo, hashed with Argon2id, and never
+written to seed files or environment files:
+
+```sh
+pnpm admin:provision -- --email operator@example.com --first-name Operator
+```
+
+This command refuses to run if any platform administrator already exists and
+does not modify an existing user's password. It is a controlled bootstrap
+utility, not a replacement for production SSO, verified invitations, or MFA.
+For an existing active user on a database with no platform administrators, use
+the bootstrap command:
+
 ```sh
 pnpm prisma:migrate:deploy
 pnpm admin:bootstrap -- --email operator@example.com
 ```
 
 The bootstrap command accepts only an existing active user and refuses to run
-after any platform admin exists. Later grants use the authenticated API.
+after any platform admin exists. Later grants use the authenticated API. Never
+commit passwords, production credentials, or populated environment files.
 
 ## Performance and scale
 
