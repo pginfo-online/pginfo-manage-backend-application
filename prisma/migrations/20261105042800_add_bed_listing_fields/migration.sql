@@ -1,0 +1,3 @@
+ALTER TABLE "beds"
+  ADD COLUMN IF NOT EXISTS "is_disabled_for_rent" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "remarks" TEXT;
