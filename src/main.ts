@@ -18,9 +18,10 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // ── CORS ─────────────────────────────────────────────────
-  const corsOrigins = process.env['CORS_ORIGINS']?.split(',') ?? [
-    'http://localhost:3000',
-  ];
+  const corsOrigins = (process.env['CORS_ORIGINS'] ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
@@ -81,11 +82,11 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   // ── Start ────────────────────────────────────────────────
-  const port = process.env['PORT'] ?? 3000;
-  await app.listen(port);
+  const port = Number(process.env['PORT'] ?? 3000);
+  await app.listen(port, '0.0.0.0');
 
   const logger = app.get(Logger);
-  logger.log(`🏠 PgInfo API running on http://localhost:${port}/${apiPrefix}`);
+  logger.log(`🏠 PgInfo API listening on port ${port}/${apiPrefix}`);
   logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);
 }
 

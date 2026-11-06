@@ -158,6 +158,12 @@ backend/
    pnpm start:worker
    ```
 
+## Deploy to Render
+
+See the [Render deployment guide](docs/render-deployment.md) for the API,
+background worker, PostgreSQL, Redis-compatible Key Value, environment
+variables, migrations, and post-deploy checks.
+
 ---
 
 ## 5. Testing & Quality Gates
