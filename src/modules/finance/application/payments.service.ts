@@ -273,12 +273,21 @@ export class PaymentsService {
       const record = await tx.billingRecord.findUnique({
         where: { id: targetBillingRecordId },
       });
-      if (record) {
+      if (
+        !record ||
+        record.residentId !== residentId ||
+        !['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'].includes(record.status)
+      ) {
+        throw new ConflictError(
+          'The selected charge is not payable for this tenant',
+        );
+      }
+      {
         const dueOnRecord = record.amount - record.paidAmount;
         const allocation = Math.min(dueOnRecord, remainingAmount);
         const newPaid = record.paidAmount + allocation;
         await tx.billingRecord.update({
-          where: { id: targetBillingRecordId },
+          where: { id: targetBillingRecordId, version: record.version },
           data: {
             paidAmount: newPaid,
             status: newPaid >= record.amount ? 'PAID' : 'PARTIALLY_PAID',
@@ -310,7 +319,7 @@ export class PaymentsService {
         const allocation = Math.min(dueOnRecord, remainingAmount);
         const newPaid = record.paidAmount + allocation;
         await tx.billingRecord.update({
-          where: { id: record.id },
+          where: { id: record.id, version: record.version },
           data: {
             paidAmount: newPaid,
             status: newPaid >= record.amount ? 'PAID' : 'PARTIALLY_PAID',
@@ -407,7 +416,7 @@ export class PaymentsService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { collectionDate: 'desc' },
+        orderBy: [{ collectionDate: 'desc' }, { id: 'desc' }],
         include: {
           resident: {
             select: {

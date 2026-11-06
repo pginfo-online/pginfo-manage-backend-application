@@ -48,3 +48,9 @@ export const queryBillingSchema = z.object({
 });
 
 export type QueryBillingDto = z.infer<typeof queryBillingSchema>;
+
+export const discountSchema = z.object({
+  amount: z.number().int().positive().max(2147483647),
+  reason: z.string().trim().min(1).max(500),
+});
+export type DiscountDto = z.infer<typeof discountSchema>;

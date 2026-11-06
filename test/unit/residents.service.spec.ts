@@ -28,7 +28,9 @@ describe('ResidentsService', () => {
         findMany: vi.fn(),
         count: vi.fn(),
         update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
+      tenantMandate: { findFirst: vi.fn() },
       occupancyRecord: {
         create: vi.fn(),
         update: vi.fn(),
@@ -37,6 +39,7 @@ describe('ResidentsService', () => {
       },
       billingRecord: {
         create: vi.fn(),
+        createMany: vi.fn(),
         aggregate: vi.fn().mockResolvedValue({
           _sum: {
             amount: 500000, // 5000 INR
@@ -47,7 +50,8 @@ describe('ResidentsService', () => {
       auditLog: {
         create: vi.fn(),
       },
-      payment: { create: vi.fn() },
+      payment: { createMany: vi.fn() },
+      $queryRaw: vi.fn(),
       $transaction: vi.fn().mockImplementation((cb) => cb(mockPrisma)),
     };
 
@@ -89,8 +93,6 @@ describe('ResidentsService', () => {
       rentDueDay: 1,
     });
     mockPrisma.resident.create.mockResolvedValue({ id: 'resident-1' });
-    mockPrisma.billingRecord.create.mockResolvedValue({ id: 'bill-1' });
-    mockPrisma.payment.create.mockResolvedValue({ id: 'payment-1' });
 
     await service.create(
       {
@@ -117,24 +119,80 @@ describe('ResidentsService', () => {
     );
 
     expect(mockPrisma.$transaction).toHaveBeenCalledOnce();
-    expect(mockPrisma.billingRecord.create).toHaveBeenCalledWith(
+    const [charge] = mockPrisma.billingRecord.createMany.mock.calls[0][0].data;
+    const [payment] = mockPrisma.payment.createMany.mock.calls[0][0].data;
+    expect(charge).toMatchObject({
+      amount: 120000,
+      paidAmount: 20000,
+      status: 'PARTIALLY_PAID',
+    });
+    expect(payment).toMatchObject({
+      billingRecordId: charge.id,
+      amount: 20000,
+      status: 'CONFIRMED',
+    });
+  });
+
+  it('does not allocate a bed from outside the selected room', async () => {
+    mockPrisma.resident.findFirst.mockResolvedValue({
+      id: 'res-1',
+      status: 'ACTIVE',
+      propertyId: 'prop-1',
+      monthlyRent: 800000,
+      version: 1,
+    });
+    mockPrisma.bed.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      service.reallocate(
+        'res-1',
+        {
+          roomId: 'room-1',
+          bedId: 'bed-other',
+          reason: 'room_change',
+        },
+        'org-1',
+        'user-1',
+      ),
+    ).rejects.toThrow(ConflictError);
+    expect(mockPrisma.bed.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          amount: 120000,
-          paidAmount: 20000,
-          status: 'PARTIALLY_PAID',
-        }),
+        where: {
+          id: 'bed-other',
+          roomId: 'room-1',
+          organizationId: 'org-1',
+          status: 'AVAILABLE',
+        },
       }),
     );
-    expect(mockPrisma.payment.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          billingRecordId: 'bill-1',
-          amount: 20000,
-          status: 'CONFIRMED',
-        }),
-      }),
+    expect(mockPrisma.occupancyRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('replays an onboarding request without creating a second resident', async () => {
+    const previous = { id: 'request-1' };
+    mockPrisma.property.findFirst.mockResolvedValue({
+      id: 'prop-1',
+      timezone: 'Asia/Kolkata',
+    });
+    mockPrisma.resident.create.mockRejectedValue(
+      new ConflictError('Duplicate request'),
     );
+    mockPrisma.resident.findFirst.mockResolvedValue(previous);
+    const result = await service.create(
+      {
+        onboardingKey: 'request-1',
+        propertyId: 'prop-1',
+        firstName: 'Ankit',
+        mobile: '9876543210',
+        monthlyRent: 800000,
+        securityDeposit: 0,
+        joiningDate: new Date('2026-11-01'),
+        profession: 'STUDENT',
+      },
+      'org-1',
+      'user-1',
+    );
+    expect(result).toEqual(previous);
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('should compute financial summary accurately for a resident', async () => {
@@ -143,6 +201,7 @@ describe('ResidentsService', () => {
       firstName: 'Ankit',
       monthlyRent: 800000,
       occupancyHistory: [],
+      mandates: [],
     });
 
     const result = await service.findById('res-1', 'org-1');

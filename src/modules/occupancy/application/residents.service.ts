@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import type {
   CreateResidentDto,
+  BulkMoveOutDto,
+  NoticeDto,
   UpdateResidentDto,
   ReallocateResidentDto,
   SwapBedsDto,
@@ -26,6 +29,24 @@ export class ResidentsService {
    * Onboards a new resident and allocates room/bed in an atomic transaction.
    */
   async create(dto: CreateResidentDto, orgId: string, userId: string) {
+    try {
+      return await this.createResident(dto, orgId, userId);
+    } catch (error) {
+      if (dto.onboardingKey) {
+        const previous = await this.prisma.resident.findFirst({
+          where: { id: dto.onboardingKey, organizationId: orgId },
+        });
+        if (previous) return previous;
+      }
+      throw error;
+    }
+  }
+
+  private async createResident(
+    dto: CreateResidentDto,
+    orgId: string,
+    userId: string,
+  ) {
     const [property, room, bed] = await Promise.all([
       this.prisma.property.findFirst({
         where: { id: dto.propertyId, organizationId: orgId },
@@ -108,6 +129,7 @@ export class ResidentsService {
 
       const resident = await tx.resident.create({
         data: {
+          id: dto.onboardingKey,
           organizationId: orgId,
           propertyId: dto.propertyId,
           roomId: dto.roomId,
@@ -177,45 +199,49 @@ export class ResidentsService {
         });
       }
 
-      for (const opening of dto.openingBalances ?? []) {
-        const due =
-          opening.amount > 0
-            ? await tx.billingRecord.create({
-                data: {
-                  organizationId: orgId,
-                  residentId: resident.id,
-                  propertyId: dto.propertyId,
-                  type: opening.type,
-                  amount: opening.amount,
-                  paidAmount: opening.collectedAmount,
-                  status:
-                    opening.collectedAmount === opening.amount
-                      ? 'PAID'
-                      : opening.collectedAmount > 0
-                        ? 'PARTIALLY_PAID'
-                        : 'ISSUED',
-                  dueDate: opening.dueDate,
-                  periodEnd: opening.dueEndDate,
-                  attachmentUrls: opening.attachmentUrls,
-                  description: opening.description,
-                },
-              })
-            : null;
-        if (opening.collectedAmount > 0) {
-          await tx.payment.create({
-            data: {
-              organizationId: orgId,
-              residentId: resident.id,
-              billingRecordId: due?.id,
-              amount: opening.collectedAmount,
-              status: 'CONFIRMED',
-              mode: opening.collectionMode,
-              collectionDate: opening.collectionDate ?? dto.joiningDate,
-              recordedBy: userId,
-              notes: opening.description ?? 'Opening balance collection',
-            },
-          });
-        }
+      const openings = (dto.openingBalances ?? []).map((entry) => ({
+        ...entry,
+        id: randomUUID(),
+      }));
+      const charges = openings.filter((entry) => entry.amount > 0);
+      if (charges.length) {
+        await tx.billingRecord.createMany({
+          data: charges.map((entry) => ({
+            id: entry.id,
+            organizationId: orgId,
+            residentId: resident.id,
+            propertyId: dto.propertyId,
+            type: entry.type,
+            amount: entry.amount,
+            paidAmount: entry.collectedAmount,
+            status:
+              entry.collectedAmount === entry.amount
+                ? 'PAID'
+                : entry.collectedAmount > 0
+                  ? 'PARTIALLY_PAID'
+                  : 'ISSUED',
+            dueDate: entry.dueDate,
+            periodEnd: entry.dueEndDate,
+            attachmentUrls: entry.attachmentUrls,
+            description: entry.description,
+          })),
+        });
+      }
+      const collections = openings.filter((entry) => entry.collectedAmount > 0);
+      if (collections.length) {
+        await tx.payment.createMany({
+          data: collections.map((entry) => ({
+            organizationId: orgId,
+            residentId: resident.id,
+            billingRecordId: entry.amount > 0 ? entry.id : null,
+            amount: entry.collectedAmount,
+            status: 'CONFIRMED',
+            mode: entry.collectionMode,
+            collectionDate: entry.collectionDate ?? dto.joiningDate,
+            recordedBy: userId,
+            notes: entry.description ?? 'Opening balance collection',
+          })),
+        });
       }
 
       // Update room status
@@ -248,15 +274,14 @@ export class ResidentsService {
       ...(query.status
         ? { status: query.status }
         : { status: { not: 'ARCHIVED' } }),
-      ...(query.search
-        ? {
-            OR: [
-              { firstName: { contains: query.search, mode: 'insensitive' } },
-              { lastName: { contains: query.search, mode: 'insensitive' } },
-              { mobile: { contains: query.search } },
-            ],
-          }
-        : {}),
+      AND: query.search?.split(/\s+/).map((term) => ({
+        OR: [
+          { firstName: { contains: term, mode: 'insensitive' } },
+          { lastName: { contains: term, mode: 'insensitive' } },
+          { mobile: { contains: term } },
+          { alternatePhone: { contains: term } },
+        ],
+      })),
     };
 
     const [total, residents] = await Promise.all([
@@ -265,9 +290,18 @@ export class ResidentsService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
-          property: { select: { id: true, name: true } },
+          mandates: {
+            where: {
+              organizationId: orgId,
+              status: 'ACTIVE',
+              collectionMode: 'AUTOPAY',
+            },
+            select: { id: true },
+            take: 1,
+          },
+          property: { select: { id: true, name: true, type: true } },
           room: { select: { id: true, roomNumber: true, floor: true } },
           bed: { select: { id: true, bedNumber: true } },
         },
@@ -284,7 +318,7 @@ export class ResidentsService {
             where: {
               residentId: { in: residentIds },
               organizationId: orgId,
-              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+              status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
             },
             _sum: {
               amount: true,
@@ -293,14 +327,14 @@ export class ResidentsService {
           })
         : [],
       residentIds.length > 0
-        ? this.prisma.billingRecord.findMany({
+        ? this.prisma.billingRecord.groupBy({
+            by: ['residentId'],
             where: {
               residentId: { in: residentIds },
               organizationId: orgId,
-              status: { in: ['ISSUED', 'PARTIALLY_PAID', 'OVERDUE'] },
+              status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
               dueDate: { lt: new Date() },
             },
-            select: { residentId: true },
           })
         : [],
     ]);
@@ -313,10 +347,11 @@ export class ResidentsService {
       duesMap.set(rec.residentId, Math.max(0, amount - paid));
     }
 
-    const formatted = residents.map((r) => {
+    const formatted = residents.map(({ mandates, ...r }) => {
       const dues = duesMap.get(r.id) ?? 0;
       return {
         ...r,
+        autopayActive: mandates.length > 0,
         dues,
         isOverdue: overdueSet.has(r.id),
       };
@@ -332,6 +367,16 @@ export class ResidentsService {
     const resident = await this.prisma.resident.findFirst({
       where: { id, organizationId: orgId },
       include: {
+        mandates: {
+          where: {
+            organizationId: orgId,
+            status: 'ACTIVE',
+            collectionMode: 'AUTOPAY',
+          },
+          select: { id: true },
+          take: 1,
+        },
+
         property: {
           select: { id: true, name: true, type: true, rentDueDay: true },
         },
@@ -371,8 +416,10 @@ export class ResidentsService {
     const totalPaid = billingSummary._sum.paidAmount ?? 0;
     const outstandingBalance = totalBilled - totalPaid;
 
+    const { mandates, ...profile } = resident;
     return {
-      ...resident,
+      ...profile,
+      autopayActive: mandates.length > 0,
       financialSummary: {
         totalBilled,
         totalPaid,
@@ -440,49 +487,72 @@ export class ResidentsService {
       throw new BadRequestException('Only active residents can be reallocated');
     }
 
-    if (dto.bedId) {
-      const targetBed = await this.prisma.bed.findFirst({
-        where: { id: dto.bedId, organizationId: orgId },
-        include: {
-          residents: {
-            where: {
-              status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
-              id: { not: residentId },
-            },
-          },
-        },
-      });
-
-      if (!targetBed) {
-        throw new NotFoundError('Target Bed', dto.bedId);
-      }
-
-      if (targetBed.residents.length > 0) {
-        throw new ConflictError(
-          `Target bed ${targetBed.bedNumber} is already occupied by ${targetBed.residents[0]?.firstName}`,
-        );
-      }
-    }
-
+    const propertyId = dto.propertyId ?? resident.propertyId;
     const oldRoomId = resident.roomId;
     const oldBedId = resident.bedId;
     const newRent = dto.newRentAmount ?? resident.monthlyRent;
 
     return this.prisma.$transaction(async (tx) => {
-      // Free old bed
-      if (oldBedId) {
+      const room = await tx.room.findFirst({
+        where: {
+          id: dto.roomId,
+          organizationId: orgId,
+          propertyId,
+          status: { not: 'ARCHIVED' },
+        },
+        select: { id: true },
+      });
+      if (!room) throw new NotFoundError('Target room', dto.roomId);
+
+      if (propertyId !== resident.propertyId) {
+        await this.requireAutopayCancelled(
+          tx,
+          orgId,
+          residentId,
+          'changing property',
+        );
+      }
+
+      const updated = await tx.resident.updateMany({
+        where: {
+          id: residentId,
+          organizationId: orgId,
+          version: resident.version,
+        },
+        data: {
+          propertyId,
+          roomId: room.id,
+          monthlyRent: newRent,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count !== 1)
+        throw new ConflictError('Tenant allocation has changed');
+
+      if (oldBedId && oldBedId !== dto.bedId) {
         await tx.bed.update({
           where: { id: oldBedId },
           data: { status: 'AVAILABLE' },
         });
       }
 
-      // Occupy new bed
-      if (dto.bedId) {
-        await tx.bed.update({
-          where: { id: dto.bedId },
+      if (dto.bedId && dto.bedId !== oldBedId) {
+        const claimed = await tx.bed.updateMany({
+          where: {
+            id: dto.bedId,
+            roomId: room.id,
+            organizationId: orgId,
+            status: 'AVAILABLE',
+          },
           data: { status: 'OCCUPIED' },
         });
+        if (claimed.count !== 1)
+          throw new ConflictError('The selected bed is no longer available');
+      }
+      if (dto.bedId && dto.bedId === oldBedId && oldRoomId !== room.id) {
+        throw new ConflictError(
+          'Selected bed does not belong to the selected room',
+        );
       }
 
       // Close previous occupancy record
@@ -504,7 +574,7 @@ export class ResidentsService {
         data: {
           organizationId: orgId,
           residentId,
-          propertyId: resident.propertyId,
+          propertyId,
           roomId: dto.roomId,
           bedId: dto.bedId,
           monthlyRent: newRent,
@@ -513,20 +583,18 @@ export class ResidentsService {
         },
       });
 
-      // Update resident record
       const updatedResident = await tx.resident.update({
         where: { id: residentId },
-        data: {
-          roomId: dto.roomId,
-          bedId: dto.bedId,
-          monthlyRent: newRent,
-          version: { increment: 1 },
-        },
+        data: { bedId: dto.bedId ?? null },
       });
 
-      // Recalculate room statuses
-      if (oldRoomId) await this.recalculateRoomStatus(tx, oldRoomId);
-      await this.recalculateRoomStatus(tx, dto.roomId);
+      const roomIds =
+        oldRoomId && oldRoomId !== dto.roomId
+          ? [oldRoomId, dto.roomId]
+          : [dto.roomId];
+      for (const roomId of roomIds.sort()) {
+        await this.recalculateRoomStatus(tx, roomId);
+      }
 
       // Audit log
       await tx.auditLog.create({
@@ -537,6 +605,8 @@ export class ResidentsService {
           entityType: 'Resident',
           entityId: residentId,
           metadata: {
+            fromPropertyId: resident.propertyId,
+            toPropertyId: propertyId,
             fromRoomId: oldRoomId,
             fromBedId: oldBedId,
             toRoomId: dto.roomId,
@@ -667,8 +737,70 @@ export class ResidentsService {
   /**
    * Records a resident move-out and releases their bed.
    */
+  async giveNotice(id: string, dto: NoticeDto, orgId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.resident.updateMany({
+        where: {
+          id,
+          organizationId: orgId,
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
+        },
+        data: {
+          status: 'NOTICE_PERIOD',
+          expectedVacatingDate: dto.date,
+          version: { increment: 1 },
+        },
+      });
+      if (!updated.count)
+        throw new ConflictError('Notice requires an active tenant');
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          userId,
+          action: 'resident.notice',
+          entityType: 'Resident',
+          entityId: id,
+          metadata: { reason: dto.reason, expectedVacatingDate: dto.date },
+        },
+      });
+      return { updated: true };
+    });
+  }
+
+  async bulkMoveOut(dto: BulkMoveOutDto, orgId: string, userId: string) {
+    return this.prisma.$transaction(
+      async (tx) => {
+        for (const id of dto.residentIds) {
+          await this.moveOutInTransaction(
+            tx,
+            id,
+            dto,
+            orgId,
+            userId,
+            dto.archive,
+          );
+        }
+        return { updated: dto.residentIds.length };
+      },
+      { timeout: 15000 },
+    );
+  }
+
   async moveOut(id: string, dto: MoveOutDto, orgId: string, userId: string) {
-    const resident = await this.prisma.resident.findFirst({
+    return this.prisma.$transaction((tx) =>
+      this.moveOutInTransaction(tx, id, dto, orgId, userId, false),
+    );
+  }
+
+  private async moveOutInTransaction(
+    tx: Prisma.TransactionClient,
+    id: string,
+    dto: MoveOutDto,
+    orgId: string,
+    userId: string,
+    archive: boolean,
+  ) {
+    const resident = await tx.resident.findFirst({
       where: { id, organizationId: orgId },
     });
 
@@ -676,61 +808,93 @@ export class ResidentsService {
       throw new NotFoundError('Resident', id);
     }
 
-    if (resident.status === 'MOVED_OUT' || resident.status === 'ARCHIVED') {
+    if (
+      (!archive && resident.status === 'MOVED_OUT') ||
+      resident.status === 'ARCHIVED'
+    ) {
       throw new BadRequestException('Resident has already moved out');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      // Free up bed
-      if (resident.bedId) {
-        await tx.bed.update({
-          where: { id: resident.bedId },
-          data: { status: 'AVAILABLE' },
-        });
-      }
-
-      // Close any active occupancy records in one write.
-      await tx.occupancyRecord.updateMany({
-        where: { residentId: id, endDate: null },
-        data: {
-          endDate: dto.moveOutDate,
-          reason: 'move_out',
-        },
-      });
-
-      // Update resident status
-      const updated = await tx.resident.update({
-        where: { id },
-        data: {
-          status: 'MOVED_OUT',
-          moveOutDate: dto.moveOutDate,
-          bedId: null, // Clear active bed reference
-          notes: dto.notes
-            ? `${resident.notes ?? ''}\nMove-out note: ${dto.notes}`
-            : resident.notes,
-          version: { increment: 1 },
-        },
-      });
-
-      // Recalculate room status
-      if (resident.roomId) {
-        await this.recalculateRoomStatus(tx, resident.roomId);
-      }
-
-      // Audit log
-      await tx.auditLog.create({
-        data: {
-          organizationId: orgId,
-          userId,
-          action: 'resident.move_out',
-          entityType: 'Resident',
-          entityId: id,
-          metadata: { moveOutDate: dto.moveOutDate },
-        },
-      });
-
-      return updated;
+    if (resident.status !== 'MOVED_OUT') {
+      await this.requireAutopayCancelled(
+        tx,
+        orgId,
+        id,
+        'moving the tenant out',
+      );
+    }
+    // Update resident status
+    const updated = await tx.resident.update({
+      where: { id, version: resident.version },
+      data: {
+        status: archive ? 'ARCHIVED' : 'MOVED_OUT',
+        moveOutDate: resident.moveOutDate ?? dto.moveOutDate,
+        bedId: null, // Clear active bed reference
+        notes: dto.notes
+          ? `${resident.notes ?? ''}\nMove-out note: ${dto.notes}`
+          : resident.notes,
+        version: { increment: 1 },
+      },
     });
+
+    // Free up bed
+    if (resident.bedId) {
+      await tx.bed.update({
+        where: { id: resident.bedId },
+        data: { status: 'AVAILABLE' },
+      });
+    }
+
+    // Close any active occupancy records in one write.
+    await tx.occupancyRecord.updateMany({
+      where: { residentId: id, endDate: null },
+      data: {
+        endDate: dto.moveOutDate,
+        reason: 'move_out',
+      },
+    });
+
+    // Recalculate room status
+    if (resident.roomId) {
+      await this.recalculateRoomStatus(tx, resident.roomId);
+    }
+
+    // Audit log
+    await tx.auditLog.create({
+      data: {
+        organizationId: orgId,
+        userId,
+        action: archive ? 'resident.archive' : 'resident.move_out',
+        entityType: 'Resident',
+        entityId: id,
+        metadata: { moveOutDate: dto.moveOutDate },
+      },
+    });
+
+    return updated;
+  }
+
+  private async requireAutopayCancelled(
+    tx: Prisma.TransactionClient,
+    orgId: string,
+    residentId: string,
+    action: string,
+  ) {
+    const mandate = await tx.tenantMandate.findFirst({
+      where: {
+        organizationId: orgId,
+        tenantId: residentId,
+        collectionMode: 'AUTOPAY',
+        status: {
+          in: ['CREATED', 'AUTHENTICATED', 'ACTIVE', 'PENDING', 'PAUSED'],
+        },
+      },
+      select: { id: true },
+    });
+    if (mandate)
+      throw new ConflictError(
+        'Cancel the existing Autopay mandate before ' + action,
+      );
   }
 
   /**
@@ -740,6 +904,7 @@ export class ResidentsService {
     tx: Prisma.TransactionClient,
     roomId: string,
   ) {
+    await tx.$queryRaw`SELECT id FROM rooms WHERE id = ${roomId}::uuid FOR NO KEY UPDATE`;
     const bedCounts = await tx.bed.groupBy({
       by: ['status'],
       where: { roomId, status: { not: 'ARCHIVED' } },

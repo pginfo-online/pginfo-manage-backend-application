@@ -8,6 +8,7 @@ import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
+import { buildAutopayInvite } from '../../finance/domain/autopay-invite.js';
 import {
   EMAIL_ADAPTER,
   WHATSAPP_ADAPTER,
@@ -230,100 +231,213 @@ export class AnnouncementsService {
     orgId: string,
     userId: string,
   ) {
-    const where: Prisma.BillingRecordWhereInput = {
+    const where: Prisma.ResidentWhereInput = {
       organizationId: orgId,
-      status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-      ...(dto.residentId ? { residentId: dto.residentId } : {}),
-      ...(dto.propertyId ? { propertyId: dto.propertyId } : {}),
+      id: dto.residentId,
+      propertyId: dto.propertyId,
+      status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
+      ...(dto.kind === 'autopay'
+        ? {
+            mandates: { none: { collectionMode: 'AUTOPAY', status: 'ACTIVE' } },
+          }
+        : {}),
     };
-
-    const dues = await this.prisma.billingRecord.findMany({
-      where,
-      include: {
-        resident: {
-          include: { property: { select: { name: true } } },
-        },
-      },
-    });
-
-    // Group dues by resident
-    const residentDues = new Map<
-      string,
-      {
-        resident: (typeof dues)[0]['resident'];
-        totalDuePaise: number;
-        bills: typeof dues;
-      }
-    >();
-
-    for (const due of dues) {
-      const resId = due.residentId;
-      const unpaid = due.amount - due.paidAmount;
-      if (unpaid <= 0) continue;
-
-      if (!residentDues.has(resId)) {
-        residentDues.set(resId, {
-          resident: due.resident,
-          totalDuePaise: 0,
-          bills: [],
-        });
-      }
-      const entry = residentDues.get(resId)!;
-      entry.totalDuePaise += unpaid;
-      entry.bills.push(due);
-    }
-
     let remindersSent = 0;
+    let failedCount = 0;
+    let missingMandates = 0;
+    const whatsapp = { accepted: 0, failed: 0, skipped: 0 };
+    const email = { accepted: 0, failed: 0, skipped: 0 };
+    let whatsappMessageId: string | null = null;
+    let whatsappError: string | null = null;
     let totalRemindedPaise = 0;
+    let after: string | undefined;
+    for (;;) {
+      const residents = await this.prisma.resident.findMany({
+        where: {
+          ...where,
+          id: dto.residentId ?? (after ? { gt: after } : undefined),
+        },
+        select: {
+          id: true,
+          firstName: true,
+          mobile: true,
+          whatsappNumber: true,
+          sendWhatsappReminder: true,
+          email: true,
+          propertyId: true,
+        },
+        orderBy: { id: 'asc' },
+        take: 100,
+      });
+      if (!residents.length) break;
+      const pendingMandates =
+        dto.kind === 'autopay'
+          ? await this.prisma.tenantMandate.findMany({
+              where: {
+                organizationId: orgId,
+                tenantId: { in: residents.map((resident) => resident.id) },
+                collectionMode: 'AUTOPAY',
+                status: { in: ['CREATED', 'PENDING'] },
+                shortUrl: { not: null },
+              },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              distinct: ['tenantId'],
+              select: {
+                tenantId: true,
+                propertyId: true,
+                shortUrl: true,
+                rentAmount: true,
+                billingDay: true,
+                property: { select: { name: true } },
+                unit: { select: { roomNumber: true } },
+              },
+            })
+          : [];
+      const mandateByResident = new Map(
+        pendingMandates.map((mandate) => [mandate.tenantId, mandate]),
+      );
+      const balances =
+        dto.kind === 'autopay'
+          ? []
+          : await this.prisma.billingRecord.groupBy({
+              by: ['residentId'],
+              where: {
+                organizationId: orgId,
+                residentId: { in: residents.map((resident) => resident.id) },
+                status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
+              },
+              _sum: { amount: true, paidAmount: true },
+            });
+      const dueByResident = new Map(
+        balances.map((entry) => [
+          entry.residentId,
+          (entry._sum.amount ?? 0) - (entry._sum.paidAmount ?? 0),
+        ]),
+      );
+      for (let start = 0; start < residents.length; start += 10) {
+        await Promise.all(
+          residents.slice(start, start + 10).map(async (resident) => {
+            const due = dueByResident.get(resident.id) ?? 0;
+            if (dto.kind !== 'autopay' && due <= 0) return;
+            const autopay = dto.kind === 'autopay';
+            const mandate = mandateByResident.get(resident.id);
+            const invite =
+              mandate?.shortUrl && mandate.propertyId === resident.propertyId
+                ? buildAutopayInvite(
+                    { ...resident, property: mandate.property },
+                    mandate.unit?.roomNumber ?? 'N/A',
+                    mandate.rentAmount,
+                    mandate.billingDay,
+                    mandate.shortUrl,
+                  )
+                : null;
+            if (autopay && !invite) missingMandates++;
+            const subject = autopay
+              ? 'Set up rent Autopay'
+              : 'Rent payment reminder';
+            const message =
+              invite?.message ??
+              (autopay
+                ? 'Please contact your property manager to set up Autopay for your rent.'
+                : 'Your outstanding balance is ' +
+                  Monetary.formatINR(due) +
+                  '. Please clear your dues.');
+            const html =
+              '<p>' +
+              message
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;') +
+              '</p>';
 
-    for (const [_, entry] of residentDues.entries()) {
-      const { resident, totalDuePaise } = entry;
-      const formattedAmount = Monetary.formatINR(totalDuePaise);
-      const propertyName = resident.property?.name ?? 'Accommodation';
+            const [whatsappResult, emailResult] = await Promise.allSettled([
+              dto.channel !== 'EMAIL' &&
+              resident.sendWhatsappReminder &&
+              (!autopay || invite)
+                ? this.whatsappAdapter.send({
+                    to: resident.whatsappNumber || resident.mobile,
+                    message,
+                    templateName: invite?.template,
+                    templateParams: invite?.templateParams,
+                  })
+                : undefined,
+              dto.channel !== 'WHATSAPP' && resident.email
+                ? this.emailAdapter.send({ to: resident.email, subject, html })
+                : undefined,
+            ]);
 
-      const reminderMessage = `🔔 *Rent Reminder*\n\nHi ${resident.firstName},\nThis is a gentle reminder that you have an outstanding balance of *${formattedAmount}* for your stay at *${propertyName}*.\n\nPlease clear your dues at the earliest. Thank you!`;
-
-      if (
-        (dto.channel === 'WHATSAPP' || dto.channel === 'BOTH') &&
-        resident.sendWhatsappReminder &&
-        (resident.whatsappNumber || resident.mobile)
-      ) {
-        await this.whatsappAdapter.send({
-          to: resident.whatsappNumber || resident.mobile,
-          message: reminderMessage,
-        });
+            let accepted = false;
+            let failed = false;
+            for (const [result, stats, requested] of [
+              [whatsappResult, whatsapp, dto.channel !== 'EMAIL'],
+              [emailResult, email, dto.channel !== 'WHATSAPP'],
+            ] as const) {
+              if (!requested) continue;
+              const delivery =
+                result.status === 'fulfilled' ? result.value : undefined;
+              if (
+                result.status === 'fulfilled' &&
+                (!delivery || delivery.messageId?.startsWith('sim_'))
+              ) {
+                stats.skipped++;
+              } else if (delivery?.success) {
+                stats.accepted++;
+                accepted = true;
+                if (dto.residentId && stats === whatsapp)
+                  whatsappMessageId = delivery.messageId ?? null;
+              } else {
+                stats.failed++;
+                failed = true;
+                if (dto.residentId && stats === whatsapp) {
+                  whatsappError =
+                    delivery?.error ?? 'WhatsApp provider request failed';
+                }
+              }
+            }
+            if (accepted) {
+              remindersSent++;
+              totalRemindedPaise += due;
+            }
+            if (failed) failedCount++;
+          }),
+        );
       }
-
-      if (
-        (dto.channel === 'EMAIL' || dto.channel === 'BOTH') &&
-        resident.email
-      ) {
-        await this.emailAdapter.send({
-          to: resident.email,
-          subject: `Rent Reminder: ${formattedAmount} due for ${propertyName}`,
-          html: `<p>Hi ${resident.firstName},</p><p>This is a gentle reminder that you have an outstanding balance of <strong>${formattedAmount}</strong> for your stay at <strong>${propertyName}</strong>.</p><p>Please clear your dues at your earliest convenience.</p><p>Thank you,<br/>Property Management</p>`,
-        });
-      }
-
-      remindersSent++;
-      totalRemindedPaise += totalDuePaise;
+      if (dto.residentId || residents.length < 100) break;
+      after = residents.at(-1)!.id;
     }
 
     await this.prisma.auditLog.create({
       data: {
         organizationId: orgId,
         userId,
-        action: 'communications.rent_reminders_sent',
+        action:
+          dto.kind === 'autopay'
+            ? 'communications.autopay_reminders_sent'
+            : 'communications.rent_reminders_sent',
+        entityType: dto.residentId ? 'Resident' : undefined,
+        entityId: dto.residentId,
         metadata: {
           remindersSent,
+          failedCount,
           totalRemindedPaise,
           channel: dto.channel,
+          whatsapp,
+          email,
+          missingMandates,
+          whatsappMessageId,
+          whatsappError,
         },
       },
     });
 
     return {
       remindersSent,
+      failedCount,
+      whatsapp,
+      email,
+      missingMandates,
+      whatsappMessageId,
+      whatsappError,
       totalRemindedPaise,
       totalRemindedFormatted: Monetary.formatINR(totalRemindedPaise),
     };

@@ -46,6 +46,7 @@ describe('Concurrency & Race Condition Defenses', () => {
       auditLog: {
         create: vi.fn(),
       },
+      $queryRaw: vi.fn(),
       $transaction: vi.fn().mockImplementation((cb) => cb(mockPrisma)),
     };
 

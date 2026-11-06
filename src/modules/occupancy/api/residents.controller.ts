@@ -20,6 +20,10 @@ import {
 import { ResidentsService } from '../application/residents.service.js';
 import {
   createResidentSchema,
+  noticeSchema,
+  bulkMoveOutSchema,
+  type NoticeDto,
+  type BulkMoveOutDto,
   updateResidentSchema,
   reallocateResidentSchema,
   swapBedsSchema,
@@ -135,6 +139,27 @@ export class ResidentsController {
     @CurrentUserId() userId: string,
   ) {
     return this.residentsService.swapBeds(dto, orgId, userId);
+  }
+
+  @Post(':id/notice')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  giveNotice(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(noticeSchema)) dto: NoticeDto,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.residentsService.giveNotice(id, dto, orgId, userId);
+  }
+
+  @Post('bulk-move-out')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  bulkMoveOut(
+    @Body(new ZodValidationPipe(bulkMoveOutSchema)) dto: BulkMoveOutDto,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.residentsService.bulkMoveOut(dto, orgId, userId);
   }
 
   @Post(':id/move-out')

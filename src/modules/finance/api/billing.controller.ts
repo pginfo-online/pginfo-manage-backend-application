@@ -19,6 +19,8 @@ import {
 import { BillingService } from '../application/billing.service.js';
 import {
   createChargeSchema,
+  discountSchema,
+  type DiscountDto,
   generateMonthlyDuesSchema,
   queryBillingSchema,
   type CreateChargeDto,
@@ -95,6 +97,17 @@ export class BillingController {
     @CurrentOrgId() orgId: string,
   ) {
     return this.billingService.findById(id, orgId);
+  }
+
+  @Post('records/:id/discount')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  async discount(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(discountSchema)) dto: DiscountDto,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.billingService.discount(id, dto, orgId, userId);
   }
 
   @Post('records/:id/cancel')

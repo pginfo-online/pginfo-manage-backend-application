@@ -1,9 +1,10 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
-import { NotFoundError } from '../../../common/errors/index.js';
+import { ConflictError, NotFoundError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import type {
   CreateChargeDto,
+  DiscountDto,
   GenerateMonthlyDuesDto,
   QueryBillingDto,
 } from '../api/dto/billing.dto.js';
@@ -192,6 +193,54 @@ export class BillingService {
   /**
    * Lists billing records with pagination and filters.
    */
+  async discount(id: string, dto: DiscountDto, orgId: string, userId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const record = await tx.billingRecord.findFirst({
+        where: { id, organizationId: orgId },
+        include: { _count: { select: { rentInvoices: true } } },
+      });
+      if (!record) throw new NotFoundError('Billing record', id);
+      if (record._count.rentInvoices > 0) {
+        throw new ConflictError(
+          'Discounts require a charge without a linked rent invoice',
+        );
+      }
+      const remaining = record.amount - record.paidAmount;
+      if (
+        !['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'].includes(
+          record.status,
+        ) ||
+        dto.amount > remaining
+      ) {
+        throw new ConflictError('Discount exceeds the outstanding amount');
+      }
+      const updated = await tx.billingRecord.update({
+        where: { id, version: record.version },
+        data: {
+          amount: { decrement: dto.amount },
+          discountAmount: { increment: dto.amount },
+          status: remaining === dto.amount ? 'PAID' : record.status,
+          version: { increment: 1 },
+        },
+      });
+      await tx.auditLog.create({
+        data: {
+          organizationId: orgId,
+          userId,
+          entityType: 'Resident',
+          entityId: record.residentId,
+          action: 'billing.discount',
+          metadata: {
+            amount: dto.amount,
+            billingRecordId: id,
+            reason: dto.reason,
+          },
+        },
+      });
+      return updated;
+    });
+  }
+
   async findAll(orgId: string, query: QueryBillingDto) {
     const where: Prisma.BillingRecordWhereInput = {
       organizationId: orgId,
@@ -220,7 +269,7 @@ export class BillingService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { dueDate: 'desc' },
+        orderBy: [{ dueDate: 'desc' }, { id: 'desc' }],
         include: {
           resident: {
             select: {
@@ -235,6 +284,38 @@ export class BillingService {
         },
       }),
     ]);
+
+    if (query.residentId && records.length) {
+      const authors = await this.prisma.auditLog.findMany({
+        where: {
+          organizationId: orgId,
+          entityType: 'BillingRecord',
+          action: 'billing.create_charge',
+          entityId: { in: records.map((record) => record.id) },
+        },
+        select: {
+          entityId: true,
+          user: { select: { firstName: true, lastName: true } },
+        },
+      });
+      const names = new Map(
+        authors.map(({ entityId, user }) => [
+          entityId,
+          user
+            ? [user.firstName, user.lastName].filter(Boolean).join(' ')
+            : null,
+        ]),
+      );
+      return buildOffsetResponse(
+        records.map((record) => ({
+          ...record,
+          addedBy: names.get(record.id) ?? null,
+        })),
+        total,
+        query.page,
+        query.limit,
+      );
+    }
 
     return buildOffsetResponse(records, total, query.page, query.limit);
   }

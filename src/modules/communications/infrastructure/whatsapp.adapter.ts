@@ -14,49 +14,115 @@ export class WhatsAppHttpAdapter implements WhatsAppAdapter {
   constructor(private readonly config: ConfigService<EnvConfig, true>) {}
 
   async send(options: SendWhatsAppOptions): Promise<NotificationResult> {
-    const apiUrl = this.config.get('WHATSAPP_API_URL');
-    const apiKey = this.config.get('WHATSAPP_API_KEY');
-
-    // Format Indian phone number with 91 prefix
-    const formattedNumber = options.to.startsWith('91')
-      ? options.to
-      : `91${options.to}`;
-
-    if (apiUrl && apiKey && !apiUrl.includes('example.com')) {
-      try {
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            to: formattedNumber,
-            message: options.message,
-            template: options.templateName,
-            params: options.templateParams,
-          }),
-        });
-
-        if (!response.ok) {
-          const err = await response.text();
-          this.logger.error(`WhatsApp delivery failed: ${err}`);
-          return { success: false, error: err };
-        }
-
-        return { success: true, messageId: `wa_${Date.now()}` };
-      } catch (err) {
-        this.logger.error(
-          `Network error sending WhatsApp: ${(err as Error).message}`,
-        );
-        return { success: false, error: (err as Error).message };
-      }
+    const localNumber = options.to.trim().replace(/[\s()-]/g, '');
+    const to = /^[6-9]\d{9}$/.test(localNumber)
+      ? '91' + localNumber
+      : localNumber.replace(/^\+/, '');
+    if (!/^[1-9]\d{9,14}$/.test(to)) {
+      return { success: false, error: 'Invalid WhatsApp recipient number' };
     }
 
-    // Dev/Sandbox simulation
-    this.logger.log(
-      `[SIMULATED WHATSAPP] To: +${formattedNumber} | Message: "${options.message.slice(0, 80)}..."`,
-    );
-    return { success: true, messageId: `sim_wa_${Date.now()}` };
+    const token = this.config.get('META_WHATSAPP_ACCESS_TOKEN');
+    const phoneId = this.config.get('META_WHATSAPP_PHONE_NUMBER_ID');
+    if (token || phoneId) {
+      if (!token || !phoneId) {
+        return {
+          success: false,
+          error: 'Meta WhatsApp credentials are incomplete',
+        };
+      }
+      const language = this.config.get('META_WHATSAPP_TEMPLATE_LANGUAGE');
+      const version = this.config.get('META_WHATSAPP_API_VERSION');
+      const named =
+        this.config.get('META_WHATSAPP_TEMPLATE_PARAMETER_FORMAT') === 'NAMED';
+      const parameters = Object.entries(options.templateParams ?? {}).map(
+        ([name, text]) => ({
+          type: 'text',
+          text,
+          ...(named ? { parameter_name: name } : {}),
+        }),
+      );
+      const payload = options.templateName
+        ? {
+            type: 'template',
+            template: {
+              name: options.templateName,
+              language: { code: language },
+              ...(parameters.length
+                ? { components: [{ type: 'body', parameters }] }
+                : {}),
+            },
+          }
+        : { type: 'text', text: { body: options.message } };
+      return this.post(
+        `https://graph.facebook.com/${version}/${phoneId}/messages`,
+        token,
+        { messaging_product: 'whatsapp', to, ...payload },
+        true,
+      );
+    }
+
+    const apiUrl = this.config.get('WHATSAPP_API_URL');
+    const apiKey = this.config.get('WHATSAPP_API_KEY');
+    if (apiUrl && apiKey && !apiUrl.includes('example.com')) {
+      return this.post(
+        apiUrl,
+        apiKey,
+        {
+          to,
+          message: options.message,
+          template: options.templateName,
+          params: options.templateParams,
+        },
+        false,
+      );
+    }
+    return { success: false, error: 'WhatsApp provider is not configured' };
+  }
+
+  private async post(
+    url: string,
+    key: string,
+    payload: object,
+    meta: boolean,
+  ): Promise<NotificationResult> {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!meta && response.ok) {
+        return { success: true, messageId: `wa_${Date.now()}` };
+      }
+      const body = (await response.json().catch(() => null)) as {
+        error?: { code?: number; error_subcode?: number };
+        messages?: { id?: string }[];
+      } | null;
+      if (!response.ok) {
+        const code = body?.error?.code;
+        const subcode = body?.error?.error_subcode;
+        const error = `WhatsApp provider rejected the message (HTTP ${response.status}${code ? `, code ${code}` : ''}${subcode ? `, subcode ${subcode}` : ''})`;
+        this.logger.warn(error);
+        return { success: false, error };
+      }
+      const messageId = body?.messages?.[0]?.id;
+      return messageId
+        ? { success: true, messageId }
+        : {
+            success: false,
+            error: 'Meta did not return a WhatsApp message ID',
+          };
+    } catch {
+      this.logger.warn('WhatsApp provider request failed or timed out');
+      return {
+        success: false,
+        error: 'WhatsApp provider request failed or timed out',
+      };
+    }
   }
 }

@@ -9,6 +9,13 @@ import {
 const dateOnly = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const date = new Date(value);
+    return (
+      Number.isFinite(date.getTime()) &&
+      date.toISOString().slice(0, 10) === value
+    );
+  }, 'Enter a valid calendar date')
   .transform((value) => new Date(value));
 const openingBalanceSchema = z
   .object({
@@ -33,6 +40,7 @@ const openingBalanceSchema = z
   );
 
 export const createResidentSchema = z.object({
+  onboardingKey: z.string().uuid().optional(),
   propertyId: z.string().uuid(),
   roomId: z.string().uuid().optional(),
   bedId: z.string().uuid().optional(),
@@ -169,6 +177,7 @@ export const updateResidentSchema = z.object({
 export type UpdateResidentDto = z.infer<typeof updateResidentSchema>;
 
 export const reallocateResidentSchema = z.object({
+  propertyId: z.string().uuid().optional(),
   roomId: z.string().uuid(),
   bedId: z.string().uuid().optional(),
   newRentAmount: z.coerce.number().int().positive().optional(),
@@ -199,9 +208,25 @@ export type MoveOutDto = z.infer<typeof moveOutSchema>;
 export const queryResidentsSchema = z.object({
   propertyId: z.string().uuid().optional(),
   status: z.nativeEnum(ResidentStatus).optional(),
-  search: z.string().optional(),
+  search: z.string().trim().max(120).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
 export type QueryResidentsDto = z.infer<typeof queryResidentsSchema>;
+
+export const noticeSchema = z.object({
+  date: dateOnly,
+  reason: z.string().trim().min(1).max(1000),
+});
+export type NoticeDto = z.infer<typeof noticeSchema>;
+
+export const bulkMoveOutSchema = moveOutSchema.extend({
+  residentIds: z
+    .array(z.string().uuid())
+    .min(1)
+    .max(50)
+    .transform((ids) => [...new Set(ids)].sort()),
+  archive: z.boolean().default(false),
+});
+export type BulkMoveOutDto = z.infer<typeof bulkMoveOutSchema>;

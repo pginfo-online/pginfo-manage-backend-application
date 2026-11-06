@@ -19,6 +19,7 @@ export const sendRentReminderSchema = z.object({
   residentId: z.string().uuid().optional(),
   propertyId: z.string().uuid().optional(),
   channel: z.enum(['WHATSAPP', 'EMAIL', 'BOTH']).default('BOTH'),
+  kind: z.enum(['rent', 'autopay']).optional(),
 });
 
 export type SendRentReminderDto = z.infer<typeof sendRentReminderSchema>;

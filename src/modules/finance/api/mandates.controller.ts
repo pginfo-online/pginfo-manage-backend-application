@@ -93,6 +93,20 @@ export class MandatesController {
     return this.mandatesService.getMandate(id, orgId);
   }
 
+  @Post(':id/resend-invite')
+  @HttpCode(HttpStatus.OK)
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  @ApiOperation({
+    summary: 'Resend WhatsApp authorization for an existing pending mandate',
+  })
+  async resendInvite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentOrgId() orgId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.mandatesService.resendInvite(id, orgId, userId);
+  }
+
   @Post(':id/cancel')
   @HttpCode(HttpStatus.OK)
   @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')

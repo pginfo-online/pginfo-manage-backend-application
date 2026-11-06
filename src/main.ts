@@ -28,6 +28,7 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: [
       'Content-Type',
       'Authorization',
+      'X-Request-Id',
       'X-Trace-Id',
       'X-Idempotency-Key',
     ],

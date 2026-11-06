@@ -9,6 +9,7 @@ import {
 } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import { Monetary } from '../domain/monetary.js';
+import { buildAutopayInvite } from '../domain/autopay-invite.js';
 import {
   WHATSAPP_ADAPTER,
   type WhatsAppAdapter,
@@ -150,57 +151,22 @@ export class MandatesService {
       },
     });
 
-    // 7. Construct WhatsApp Notification Payload
     const rentRupees = Monetary.toRupees(dto.rentAmount);
-    const tenantPhone = tenant.whatsappNumber || tenant.mobile;
-    const whatsappMessage =
-      `Hello ${tenant.firstName}, your automated hands-free rent collection mandate ` +
-      `for ${tenant.property.name} (Unit ${unitNumber}) has been generated.\n\n` +
-      `Rent Amount: ₹${rentRupees.toLocaleString('en-IN')}/month\n` +
-      `Billing Day: ${dto.billingDay}th of every month\n` +
-      `Tenure: ${dto.tenureMonths} months\n\n` +
-      `Please authorize your UPI AutoPay or e-Mandate here:\n` +
-      `${subscription.shortUrl}\n\n` +
-      `Once approved, your monthly rent will be deducted automatically with zero manual follow-ups!`;
-
-    const whatsappPayload = {
-      to: tenantPhone,
-      message: whatsappMessage,
-      template: 'rent_autopay_mandate_invite',
-      templateParams: {
-        tenant_name: tenant.firstName,
-        property_name: tenant.property.name,
-        unit_number: unitNumber,
-        rent_amount: `₹${rentRupees.toLocaleString('en-IN')}`,
-        billing_day: `${dto.billingDay}th`,
-        auth_url: subscription.shortUrl,
-      },
-      authorizationUrl: subscription.shortUrl,
-    };
-
-    // 8. Trigger WhatsApp notification
-    let notificationSent = false;
-    let notificationError: string | null = null;
-
-    if (dto.sendWhatsAppNotification && this.whatsappAdapter) {
-      try {
-        const result = await this.whatsappAdapter.send({
-          to: tenantPhone,
-          message: whatsappMessage,
-          templateName: 'rent_autopay_mandate_invite',
-          templateParams: whatsappPayload.templateParams,
-        });
-        notificationSent = result.success;
-        if (!result.success && result.error) {
-          notificationError = result.error;
-        }
-      } catch (err) {
-        notificationError = (err as Error).message;
-        this.logger.warn(
-          `Failed to send WhatsApp mandate invite: ${(err as Error).message}`,
-        );
-      }
-    }
+    const whatsappPayload = buildAutopayInvite(
+      tenant,
+      unitNumber,
+      dto.rentAmount,
+      dto.billingDay,
+      subscription.shortUrl,
+    );
+    const { notificationSent, notificationError, notificationMessageId } =
+      dto.sendWhatsAppNotification
+        ? await this.sendInvite(whatsappPayload)
+        : {
+            notificationSent: false,
+            notificationError: null,
+            notificationMessageId: null,
+          };
 
     // 9. Audit Log
     await this.prisma.auditLog.create({
@@ -215,6 +181,8 @@ export class MandatesService {
           rentAmount: dto.rentAmount,
           billingDay: dto.billingDay,
           shortUrl: subscription.shortUrl,
+          notificationSent,
+          notificationMessageId,
         },
       },
     });
@@ -231,7 +199,84 @@ export class MandatesService {
       whatsappPayload,
       notificationSent,
       notificationError,
+      notificationMessageId,
     };
+  }
+
+  async resendInvite(id: string, orgId: string, userId: string) {
+    const mandate = await this.prisma.tenantMandate.findFirst({
+      where: { id, organizationId: orgId },
+      include: {
+        tenant: {
+          select: {
+            firstName: true,
+            mobile: true,
+            whatsappNumber: true,
+            status: true,
+            propertyId: true,
+          },
+        },
+        property: { select: { name: true } },
+        unit: { select: { roomNumber: true } },
+      },
+    });
+    if (!mandate) throw new NotFoundError('Tenant mandate', id);
+    if (
+      !['CREATED', 'PENDING'].includes(mandate.status) ||
+      mandate.collectionMode !== 'AUTOPAY' ||
+      !mandate.shortUrl ||
+      ['MOVED_OUT', 'ARCHIVED'].includes(mandate.tenant.status) ||
+      mandate.tenant.propertyId !== mandate.propertyId
+    ) {
+      throw new ConflictError(
+        'This mandate is no longer awaiting authorization',
+      );
+    }
+
+    const payload = buildAutopayInvite(
+      { ...mandate.tenant, property: mandate.property },
+      mandate.unit?.roomNumber ?? 'N/A',
+      mandate.rentAmount,
+      mandate.billingDay,
+      mandate.shortUrl,
+    );
+    const result = await this.sendInvite(payload);
+    await this.prisma.auditLog.create({
+      data: {
+        organizationId: orgId,
+        userId,
+        entityType: 'TenantMandate',
+        entityId: id,
+        action: 'rent.mandate_invite_resent',
+        metadata: result,
+      },
+    });
+    return result;
+  }
+
+  private async sendInvite(payload: ReturnType<typeof buildAutopayInvite>) {
+    try {
+      const result = await this.whatsappAdapter?.send({
+        to: payload.to,
+        message: payload.message,
+        templateName: payload.template,
+        templateParams: payload.templateParams,
+      });
+      return {
+        notificationSent: result?.success ?? false,
+        notificationError: result?.success
+          ? null
+          : (result?.error ?? 'WhatsApp provider is unavailable'),
+        notificationMessageId: result?.messageId ?? null,
+      };
+    } catch {
+      this.logger.warn('Failed to send WhatsApp mandate invite');
+      return {
+        notificationSent: false,
+        notificationError: 'WhatsApp provider request failed',
+        notificationMessageId: null,
+      };
+    }
   }
 
   /**

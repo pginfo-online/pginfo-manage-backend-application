@@ -495,6 +495,8 @@ model Resident {
   // Enforce: one active resident per bed
   // NOTE: Partial unique index must be added via raw SQL migration
   // @@unique([bedId]) WHERE status IN ('ACTIVE', 'NOTICE_PERIOD')
+  @@index([organizationId, createdAt(sort: Desc), id(sort: Desc)], map: "residents_org_created_idx")
+  @@index([organizationId, propertyId, createdAt(sort: Desc), id(sort: Desc)], map: "residents_org_property_created_idx")
   @@map("residents")
 }
 
@@ -562,6 +564,7 @@ model BillingRecord {
   amount        Int // Total billed amount
   paidAmount    Int @default(0) @map("paid_amount")
   lateFeeAmount Int @default(0) @map("late_fee_amount")
+  discountAmount Int @default(0) @map("discount_amount")
 
   // Billing period
   billingMonth Int?      @map("billing_month") // 1-12
@@ -588,6 +591,7 @@ model BillingRecord {
   @@index([residentId])
   @@index([status])
   @@index([dueDate])
+  @@index([organizationId, residentId, status, dueDate], map: "billing_records_org_resident_status_due_idx")
   @@map("billing_records")
 }
 

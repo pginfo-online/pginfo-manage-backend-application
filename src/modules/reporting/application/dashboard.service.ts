@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
@@ -59,6 +60,42 @@ export class DashboardService {
   }
 
   async getActivity(orgId: string, query: ActivityQueryDto) {
+    if (query.entityType === 'Resident') {
+      const where = Prisma.sql`
+        audit.organization_id = ${orgId}::uuid AND (
+          (audit.entity_type = 'Resident' AND audit.entity_id = ${query.entityId}) OR
+          (audit.entity_type = 'BillingRecord' AND EXISTS (
+            SELECT 1 FROM billing_records bill
+            WHERE bill.id::text = audit.entity_id AND bill.organization_id = audit.organization_id
+              AND bill.resident_id = ${query.entityId}::uuid
+          )) OR
+          (audit.entity_type = 'Payment' AND EXISTS (
+            SELECT 1 FROM payments payment
+            WHERE payment.id::text = audit.entity_id AND payment.organization_id = audit.organization_id
+              AND payment.resident_id = ${query.entityId}::uuid
+          ))
+        )
+      `;
+      const [items, counts] = await Promise.all([
+        this.prisma.$queryRaw<Record<string, unknown>[]>`
+          SELECT audit.id, audit.action, audit.metadata, audit.created_at AS "createdAt",
+                 NULLIF(concat_ws(' ', actor.first_name, actor.last_name), '') AS actor
+          FROM audit_logs audit LEFT JOIN users actor ON actor.id = audit.user_id
+          WHERE ${where}
+          ORDER BY audit.created_at DESC, audit.id DESC
+          OFFSET ${(query.page - 1) * query.limit} LIMIT ${query.limit}
+        `,
+        this.prisma.$queryRaw<{ count: bigint }[]>`
+          SELECT count(*) AS count FROM audit_logs audit WHERE ${where}
+        `,
+      ]);
+      return buildOffsetResponse(
+        items,
+        Number(counts[0]?.count ?? 0),
+        query.page,
+        query.limit,
+      );
+    }
     const where = {
       organizationId: orgId,
       entityType: query.entityType,
