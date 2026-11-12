@@ -1,4 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { EnvConfig } from '../../../config/index.js';
@@ -77,6 +81,10 @@ export interface CreatePaymentLinkOptions {
     email?: string;
   };
   notes?: Record<string, string>;
+  requireConfigured?: boolean;
+  notify?: boolean;
+  referenceId?: string;
+  expireBy?: number;
 }
 
 export interface PaymentLinkResult {
@@ -90,6 +98,42 @@ export class RazorpayAdapter {
   private readonly logger = new Logger(RazorpayAdapter.name);
 
   constructor(private readonly config: ConfigService<EnvConfig, true>) {}
+
+  canCreateMoneyLinks(): boolean {
+    return this.isLiveOrConfigured() && Boolean(this.getWebhookSecret());
+  }
+  async fetchPayment(id: string): Promise<{
+    id: string;
+    order_id: string;
+    amount: number;
+    currency: string;
+    status: string;
+  }> {
+    if (!/^pay_[A-Za-z0-9]+$/.test(id))
+      throw new Error('Invalid gateway payment ID');
+    if (!this.isLiveOrConfigured())
+      throw new ServiceUnavailableException(
+        'Razorpay credentials are not configured',
+      );
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(id)}`,
+      {
+        headers: { Authorization: `Basic ${this.getBasicAuthHeader()}` },
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+    if (!response.ok)
+      throw new ServiceUnavailableException(
+        'Unable to verify payment with the gateway',
+      );
+    return (await response.json()) as {
+      id: string;
+      order_id: string;
+      amount: number;
+      currency: string;
+      status: string;
+    };
+  }
 
   private getKeyId(): string {
     return this.config.get('RAZORPAY_KEY_ID') || '';
@@ -586,12 +630,17 @@ export class RazorpayAdapter {
   async createPaymentLink(
     options: CreatePaymentLinkOptions,
   ): Promise<PaymentLinkResult> {
+    if (options.requireConfigured && !this.canCreateMoneyLinks())
+      throw new ServiceUnavailableException(
+        'Configure Razorpay API credentials and webhook secret to create payment links',
+      );
     if (this.isLiveOrConfigured()) {
       try {
         const response = await fetch(
           'https://api.razorpay.com/v1/payment_links',
           {
             method: 'POST',
+            signal: AbortSignal.timeout(15000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Basic ${this.getBasicAuthHeader()}`,
@@ -603,10 +652,15 @@ export class RazorpayAdapter {
               description: options.description,
               customer: options.customer,
               notify: {
-                sms: true,
-                email: Boolean(options.customer.email),
+                sms: options.notify ?? true,
+                email:
+                  (options.notify ?? true) && Boolean(options.customer.email),
               },
-              reminder_enable: true,
+              reminder_enable: options.notify ?? true,
+              ...(options.referenceId
+                ? { reference_id: options.referenceId }
+                : {}),
+              ...(options.expireBy ? { expire_by: options.expireBy } : {}),
               notes: options.notes,
             }),
           },

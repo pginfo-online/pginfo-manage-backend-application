@@ -161,7 +161,13 @@ export class PayoutsService {
         status: 'ACTIVE',
         ...(propertyId ? { OR: [{ propertyId }, { propertyId: null }] } : {}),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        ...(propertyId
+          ? [{ propertyId: { sort: 'desc' as const, nulls: 'last' as const } }]
+          : []),
+        { createdAt: 'desc' as const },
+        { id: 'desc' as const },
+      ],
     });
 
     if (!account) {
@@ -180,6 +186,31 @@ export class PayoutsService {
   async queryPayoutAccounts(query: QueryPayoutAccountsDto, orgId: string) {
     const where = {
       organizationId: orgId,
+      ...(query.search
+        ? {
+            OR: [
+              {
+                beneficiaryName: {
+                  contains: query.search,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                businessName: {
+                  contains: query.search,
+                  mode: 'insensitive' as const,
+                },
+              },
+              {
+                ifscCode: {
+                  contains: query.search,
+                  mode: 'insensitive' as const,
+                },
+              },
+              { accountNumberMasked: { contains: query.search } },
+            ],
+          }
+        : {}),
       ...(query.propertyId ? { propertyId: query.propertyId } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.kycStatus ? { kycStatus: query.kycStatus } : {}),
@@ -191,7 +222,7 @@ export class PayoutsService {
         where,
         skip: offset,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           property: { select: { id: true, name: true } },
           user: {
@@ -202,6 +233,6 @@ export class PayoutsService {
       this.prisma.landlordPayoutAccount.count({ where }),
     ]);
 
-    return buildOffsetResponse(accounts, total, query.limit, offset);
+    return buildOffsetResponse(accounts, total, query.page, query.limit);
   }
 }

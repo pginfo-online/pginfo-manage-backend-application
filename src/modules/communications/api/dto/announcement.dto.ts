@@ -16,6 +16,7 @@ export const createAnnouncementSchema = z.object({
 export type CreateAnnouncementDto = z.infer<typeof createAnnouncementSchema>;
 
 export const sendRentReminderSchema = z.object({
+  residentIds: z.array(z.string().uuid()).min(1).max(100).optional(),
   residentId: z.string().uuid().optional(),
   propertyId: z.string().uuid().optional(),
   channel: z.enum(['WHATSAPP', 'EMAIL', 'BOTH']).default('BOTH'),

@@ -13,10 +13,14 @@ import { InvoicesService } from './application/invoices.service.js';
 import { RazorpayWebhookService } from './application/razorpay-webhook.service.js';
 import { RazorpayAdapter } from './infrastructure/razorpay.adapter.js';
 import { CommunicationsModule } from '../communications/communications.module.js';
+import { MoneyController } from './api/money.controller.js';
+import { MoneyService } from './application/money.service.js';
+import { MoneyLinksService } from './application/money-links.service.js';
 
 @Module({
   imports: [CommunicationsModule],
   controllers: [
+    MoneyController,
     BillingController,
     PaymentsController,
     PayoutsController,
@@ -25,6 +29,8 @@ import { CommunicationsModule } from '../communications/communications.module.js
     RazorpayWebhookController,
   ],
   providers: [
+    MoneyLinksService,
+    MoneyService,
     BillingService,
     PaymentsService,
     PayoutsService,

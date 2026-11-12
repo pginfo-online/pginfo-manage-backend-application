@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calendarDateSchema } from '../../../../common/validation/date.js';
 import { PaymentMode } from '@prisma/client';
 
 export const createExpenseSchema = z.object({
@@ -7,10 +8,9 @@ export const createExpenseSchema = z.object({
   amount: z.coerce
     .number()
     .int()
-    .positive('Expense amount must be positive paise'),
-  expenseDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'expenseDate must be YYYY-MM-DD')
+    .positive('Expense amount must be positive paise')
+    .max(2147483647),
+  expenseDate: calendarDateSchema
     .default(() => new Date().toISOString().slice(0, 10))
     .transform((d) => new Date(d)),
   paymentMode: z.nativeEnum(PaymentMode),
@@ -39,14 +39,10 @@ export const queryExpensesSchema = z.object({
   categoryId: z.string().uuid().optional(),
   paymentMode: z.nativeEnum(PaymentMode).optional(),
   search: z.string().trim().max(100).optional(),
-  startDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  startDate: calendarDateSchema
     .optional()
     .transform((d) => (d ? new Date(d) : undefined)),
-  endDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  endDate: calendarDateSchema
     .optional()
     .transform((d) => (d ? new Date(d) : undefined)),
   page: z.coerce.number().int().min(1).default(1),

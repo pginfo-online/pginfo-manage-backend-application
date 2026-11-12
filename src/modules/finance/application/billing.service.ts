@@ -26,98 +26,36 @@ export class BillingService {
     orgId: string,
     userId: string,
   ) {
-    const whereResident: Prisma.ResidentWhereInput = {
-      organizationId: orgId,
-      status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
-      ...(dto.propertyId ? { propertyId: dto.propertyId } : {}),
-    };
-
-    const residents = await this.prisma.resident.findMany({
-      where: whereResident,
-      include: {
-        property: { select: { rentDueDay: true } },
-      },
-    });
-
-    let generatedCount = 0;
-    let skippedCount = 0;
-    let totalAmount = 0;
-
+    // One INSERT ... SELECT replaces a resident scan and two round trips per
+    // resident. Both unique constraints remain the concurrency authority.
     const startOfMonth = new Date(
       Date.UTC(dto.billingYear, dto.billingMonth - 1, 1),
     );
     const endOfMonth = new Date(Date.UTC(dto.billingYear, dto.billingMonth, 0));
-
-    for (const resident of residents) {
-      const idempotencyKey = `rent_${resident.id}_${dto.billingYear}_${dto.billingMonth}`;
-
-      // Check if bill already exists for this resident and period
-      const existing = await this.prisma.billingRecord.findFirst({
-        where: {
-          OR: [
-            { idempotencyKey },
-            {
-              residentId: resident.id,
-              type: 'RENT',
-              billingMonth: dto.billingMonth,
-              billingYear: dto.billingYear,
-            },
-          ],
-        },
-      });
-
-      if (existing) {
-        skippedCount++;
-        continue;
-      }
-
-      // Calculate due date based on rent due day
-      const dueDay = Math.min(
-        resident.rentDueDay ?? resident.property.rentDueDay,
-        endOfMonth.getUTCDate(),
-      );
-      const dueDate = new Date(
-        Date.UTC(dto.billingYear, dto.billingMonth - 1, dueDay),
-      );
-
-      const monthName = startOfMonth.toLocaleString('en-US', {
-        month: 'long',
-        timeZone: 'UTC',
-      });
-
-      try {
-        await this.prisma.billingRecord.create({
-          data: {
-            organizationId: orgId,
-            residentId: resident.id,
-            propertyId: resident.propertyId,
-            type: 'RENT',
-            status: 'ISSUED',
-            amount: resident.monthlyRent,
-            billingMonth: dto.billingMonth,
-            billingYear: dto.billingYear,
-            dueDate,
-            periodStart: startOfMonth,
-            periodEnd: endOfMonth,
-            description: `Rent for ${monthName} ${dto.billingYear}`,
-            idempotencyKey,
-          },
-        });
-
-        generatedCount++;
-        totalAmount += resident.monthlyRent;
-      } catch (err: unknown) {
-        // If concurrent worker already inserted this unique billing record, skip gracefully
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002'
-        ) {
-          skippedCount++;
-          continue;
-        }
-        throw err;
-      }
-    }
+    const monthName = startOfMonth.toLocaleString('en-US', {
+      month: 'long',
+      timeZone: 'UTC',
+    });
+    const [result] = await this.prisma.$queryRaw<
+      { generatedCount: number; skippedCount: number; totalAmount: number }[]
+    >(Prisma.sql`
+      WITH candidates AS MATERIALIZED (
+        SELECT r.id,r.organization_id,r.property_id,r.monthly_rent,
+          LEAST(COALESCE(r.rent_due_day,p.rent_due_day),${endOfMonth.getUTCDate()}) AS due_day
+        FROM residents r JOIN properties p ON p.id=r.property_id
+        WHERE r.organization_id=${orgId}::uuid AND r.status IN ('ACTIVE','NOTICE_PERIOD')
+          ${dto.propertyId ? Prisma.sql`AND r.property_id=${dto.propertyId}::uuid` : Prisma.empty}
+      ), inserted AS (
+        INSERT INTO billing_records (id,organization_id,resident_id,property_id,type,status,amount,billing_month,billing_year,due_date,period_start,period_end,description,idempotency_key,updated_at)
+        SELECT gen_random_uuid(),organization_id,id,property_id,'RENT','ISSUED',monthly_rent,${dto.billingMonth},${dto.billingYear},
+          make_date(${dto.billingYear}::int,${dto.billingMonth}::int,due_day::int),${startOfMonth},${endOfMonth},${`Rent for ${monthName} ${dto.billingYear}`},
+          'rent_'||id::text||'_'||${String(dto.billingYear)}||'_'||${String(dto.billingMonth)},NOW()
+        FROM candidates ON CONFLICT DO NOTHING RETURNING amount
+      ) SELECT (SELECT COUNT(*)::int FROM inserted) AS "generatedCount",
+        ((SELECT COUNT(*) FROM candidates)-(SELECT COUNT(*) FROM inserted))::int AS "skippedCount",
+        COALESCE((SELECT SUM(amount) FROM inserted),0)::float8 AS "totalAmount"
+    `);
+    const { generatedCount, skippedCount, totalAmount } = result!;
 
     // Audit log
     await this.prisma.auditLog.create({

@@ -233,7 +233,7 @@ export class AnnouncementsService {
   ) {
     const where: Prisma.ResidentWhereInput = {
       organizationId: orgId,
-      id: dto.residentId,
+      id: dto.residentIds ? { in: dto.residentIds } : dto.residentId,
       propertyId: dto.propertyId,
       status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
       ...(dto.kind === 'autopay'
@@ -255,7 +255,9 @@ export class AnnouncementsService {
       const residents = await this.prisma.resident.findMany({
         where: {
           ...where,
-          id: dto.residentId ?? (after ? { gt: after } : undefined),
+          id: dto.residentIds
+            ? { in: dto.residentIds, ...(after ? { gt: after } : {}) }
+            : (dto.residentId ?? (after ? { gt: after } : undefined)),
         },
         select: {
           id: true,

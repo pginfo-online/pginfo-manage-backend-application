@@ -115,7 +115,7 @@ export class ExpensesService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { expenseDate: 'desc' },
+        orderBy: [{ expenseDate: 'desc' }, { id: 'desc' }],
         include: {
           category: { select: { id: true, name: true } },
           property: { select: { id: true, name: true } },

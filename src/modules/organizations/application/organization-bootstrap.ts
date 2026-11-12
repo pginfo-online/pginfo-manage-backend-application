@@ -1,6 +1,17 @@
 import type { Prisma } from '@prisma/client';
 
 const SYSTEM_EXPENSE_CATEGORIES = [
+  'Salary',
+  'Electrical Appliances',
+  'Services',
+  'Other',
+  'Travel & Fuel',
+  'Insurance Premium',
+  'Loan EMI',
+  'Maintenance',
+  'Cleaning',
+  'Tax',
+  'Rent',
   'Groceries',
   'EMI',
   'Salaries',

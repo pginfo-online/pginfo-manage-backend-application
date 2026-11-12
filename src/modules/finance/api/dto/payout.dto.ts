@@ -47,6 +47,7 @@ export const onboardOwnerSchema = z.object({
 export type OnboardOwnerDto = z.infer<typeof onboardOwnerSchema>;
 
 export const queryPayoutAccountsSchema = z.object({
+  search: z.string().trim().max(100).optional(),
   propertyId: z.string().uuid().optional(),
   status: z.nativeEnum(PayoutAccountStatus).optional(),
   kycStatus: z.nativeEnum(KycStatus).optional(),

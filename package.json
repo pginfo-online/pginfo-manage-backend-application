@@ -4,6 +4,7 @@
   "description": "PgInfo — Production-grade property management platform for the Indian rental market",
   "author": "",
   "private": true,
+  "packageManager": "pnpm@12.15.0",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {

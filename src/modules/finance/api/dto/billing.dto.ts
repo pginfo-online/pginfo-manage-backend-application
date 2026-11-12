@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { calendarDateSchema } from '../../../../common/validation/date.js';
 import { BillingType, BillingStatus } from '@prisma/client';
 
 export const createChargeSchema = z.object({
@@ -7,20 +8,14 @@ export const createChargeSchema = z.object({
   amount: z.coerce
     .number()
     .int()
-    .positive('Charge amount must be positive paise'),
-  dueDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'dueDate must be YYYY-MM-DD')
-    .transform((d) => new Date(d)),
+    .positive('Charge amount must be positive paise')
+    .max(2147483647),
+  dueDate: calendarDateSchema.transform((d) => new Date(d)),
   description: z.string().min(1, 'Description is required').trim(),
-  periodStart: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  periodStart: calendarDateSchema
     .optional()
     .transform((d) => (d ? new Date(d) : undefined)),
-  periodEnd: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
+  periodEnd: calendarDateSchema
     .optional()
     .transform((d) => (d ? new Date(d) : undefined)),
 });

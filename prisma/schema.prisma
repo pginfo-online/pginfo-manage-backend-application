@@ -198,6 +198,9 @@ model Organization {
   payoutAccounts LandlordPayoutAccount[]
   mandates       TenantMandate[]
   rentInvoices   RentInvoice[]
+  duePackages    DuePackage[]
+  expenseParties ExpenseParty[]
+  discountOffers DiscountOffer[]
 
   @@map("organizations")
 }
@@ -488,6 +491,7 @@ model Resident {
   occupancyHistory OccupancyRecord[]
   mandates         TenantMandate[]
   rentInvoices     RentInvoice[]
+  discountOffers   DiscountOffer[]
 
   @@index([organizationId])
   @@index([propertyId])
@@ -549,6 +553,55 @@ enum BillingType {
   @@map("billing_type")
 }
 
+model DuePackage {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  propertyType   PropertyType @map("property_type")
+  name           String
+  category       String
+  billing        String
+  amount         Int
+  description    String       @default("")
+  isActive       Boolean      @default(true) @map("is_active")
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "due_packages_org_fk")
+
+  @@unique([organizationId, propertyType, name])
+  @@index([organizationId, isActive, name])
+  @@map("due_packages")
+}
+
+model ExpenseParty {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  name           String
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "expense_parties_org_fk")
+
+  @@unique([organizationId, name])
+  @@map("expense_parties")
+}
+
+model DiscountOffer {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  residentId     String       @map("resident_id") @db.Uuid
+  amount         Int
+  validTill      DateTime     @map("valid_till") @db.Date
+  minimumPayment String       @map("minimum_payment")
+  minimumAmount  Int?         @map("minimum_amount")
+  description    String
+  consumedAt     DateTime?    @map("consumed_at") @db.Timestamptz
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "discount_offers_org_fk")
+  resident       Resident     @relation(fields: [residentId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "discount_offers_resident_fk")
+
+  @@index([organizationId, residentId, consumedAt, validTill])
+  @@map("discount_offers")
+}
+
 model BillingRecord {
   id             String @id @default(uuid()) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -561,9 +614,9 @@ model BillingRecord {
   attachmentUrls String[]      @default([]) @map("attachment_urls")
 
   // Amounts in paise
-  amount        Int // Total billed amount
-  paidAmount    Int @default(0) @map("paid_amount")
-  lateFeeAmount Int @default(0) @map("late_fee_amount")
+  amount         Int // Total billed amount
+  paidAmount     Int @default(0) @map("paid_amount")
+  lateFeeAmount  Int @default(0) @map("late_fee_amount")
   discountAmount Int @default(0) @map("discount_amount")
 
   // Billing period
@@ -581,8 +634,9 @@ model BillingRecord {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  resident     Resident      @relation(fields: [residentId], references: [id])
+  resident     Resident            @relation(fields: [residentId], references: [id])
   payments     Payment[]
+  allocations  PaymentAllocation[]
   rentInvoices RentInvoice[]
 
   // Prevent duplicate rent billing for same resident and month
@@ -592,6 +646,7 @@ model BillingRecord {
   @@index([status])
   @@index([dueDate])
   @@index([organizationId, residentId, status, dueDate], map: "billing_records_org_resident_status_due_idx")
+  @@index([organizationId, propertyId, status, dueDate, id], map: "billing_money_scope_idx")
   @@map("billing_records")
 }
 
@@ -622,13 +677,16 @@ model Payment {
   residentId      String  @map("resident_id") @db.Uuid
   billingRecordId String? @map("billing_record_id") @db.Uuid
 
-  amount         Int // paise
-  status         PaymentStatus @default(PENDING)
-  mode           PaymentMode
-  collectionDate DateTime      @map("collection_date") @db.Date
-  reference      String? // UPI ref, cheque number, etc.
-  notes          String?
-  proofUrl       String?       @map("proof_url")
+  amount               Int // paise
+  status               PaymentStatus @default(PENDING)
+  mode                 PaymentMode
+  collectionDate       DateTime      @map("collection_date") @db.Date
+  reference            String? // UPI ref, cheque number, etc.
+  notes                String?
+  proofUrl             String?       @map("proof_url")
+  paymentLinkId        String?       @unique @map("payment_link_id")
+  paymentLinkUrl       String?       @map("payment_link_url")
+  paymentLinkExpiresAt DateTime?     @map("payment_link_expires_at") @db.Timestamptz
 
   // Razorpay-specific
   razorpayOrderId   String? @unique @map("razorpay_order_id")
@@ -644,13 +702,27 @@ model Payment {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  resident      Resident       @relation(fields: [residentId], references: [id])
-  billingRecord BillingRecord? @relation(fields: [billingRecordId], references: [id])
+  resident      Resident            @relation(fields: [residentId], references: [id])
+  billingRecord BillingRecord?      @relation(fields: [billingRecordId], references: [id])
+  allocations   PaymentAllocation[]
 
   @@index([organizationId])
   @@index([residentId])
   @@index([status])
+  @@index([organizationId, status, collectionDate, id], map: "payment_money_date_idx")
   @@map("payments")
+}
+
+model PaymentAllocation {
+  paymentId       String        @map("payment_id") @db.Uuid
+  billingRecordId String        @map("billing_record_id") @db.Uuid
+  amount          Int
+  payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  billingRecord   BillingRecord @relation(fields: [billingRecordId], references: [id])
+
+  @@id([paymentId, billingRecordId])
+  @@index([billingRecordId])
+  @@map("payment_allocations")
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -697,6 +769,7 @@ model Expense {
   @@index([organizationId])
   @@index([propertyId])
   @@index([expenseDate])
+  @@index([organizationId, propertyId, expenseDate, id], map: "expense_money_scope_idx")
   @@map("expenses")
 }
 

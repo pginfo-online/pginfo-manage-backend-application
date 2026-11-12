@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ResidentsService } from '../../src/modules/occupancy/application/residents.service.js';
 import { BillingService } from '../../src/modules/finance/application/billing.service.js';
 import { ConflictError } from '../../src/common/errors/index.js';
-import { Prisma } from '@prisma/client';
 
 describe('Concurrency & Race Condition Defenses', () => {
   let residentsService: ResidentsService;
@@ -112,7 +111,7 @@ describe('Concurrency & Race Condition Defenses', () => {
     );
   });
 
-  it('Concurrent Billing Runs: Database unique constraint P2002 prevents duplicates on collision', async () => {
+  it('Concurrent Billing Runs: atomic insert skips conflicting monthly dues', async () => {
     mockPrisma.resident.findMany.mockResolvedValue([
       {
         id: 'res-10',
@@ -123,22 +122,17 @@ describe('Concurrency & Race Condition Defenses', () => {
       },
     ]);
 
-    mockPrisma.billingRecord.findFirst.mockResolvedValue(null);
-
     let firstInserted = false;
-    mockPrisma.billingRecord.create.mockImplementation(() => {
-      if (firstInserted) {
-        // Simulate Postgres unique constraint violation
-        throw new Prisma.PrismaClientKnownRequestError(
-          'Unique constraint failed on the fields: (`residentId`,`type`,`billingMonth`,`billingYear`)',
-          {
-            code: 'P2002',
-            clientVersion: '6.0.0',
-          },
-        );
-      }
+    mockPrisma.$queryRaw.mockImplementation(() => {
+      const generated = firstInserted ? 0 : 1;
       firstInserted = true;
-      return Promise.resolve({ id: 'bill-1' });
+      return Promise.resolve([
+        {
+          generatedCount: generated,
+          skippedCount: 1 - generated,
+          totalAmount: generated * 750000,
+        },
+      ]);
     });
 
     // Run two billing jobs concurrently

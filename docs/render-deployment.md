@@ -16,20 +16,18 @@ PostgreSQL database and Render Key Value in the same Render region.
 
 ## 2. Create the API Web Service
 
-Create a Web Service for the repository with:
+Create a Web Service using the Docker runtime for the repository with:
 
 | Setting           | Value                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| Runtime           | Node                                                                                                   |
+| Runtime           | Docker                                                                                                 |
 | Root Directory    | `.` (the backend repository root)                                                                      |
-| Build Command     | `corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm prisma generate && pnpm build` |
-| Start Command     | `node dist/main.js`                                                                                    |
+| Dockerfile Path   | `./Dockerfile`                                                                                         |
 | Health Check Path | `/health/ready`                                                                                        |
 
-Use Node.js 22 or newer and pnpm 9 or newer. The build installs development
-dependencies because Prisma CLI is a development dependency, generates the
-Prisma client, and compiles the API. The service listens on Render's `PORT` and
-binds to `0.0.0.0`.
+The Dockerfile pins pnpm, installs from the frozen lockfile, generates the
+Prisma client, and compiles the API. Its default command starts the API. The
+service listens on Render's `PORT` and binds to `0.0.0.0`.
 
 ### Database migrations
 
@@ -91,14 +89,15 @@ secrets private.
 
 ## 4. Create the Background Worker
 
-Create a Render **Background Worker** from the same repository and region:
+Create a Render **Background Worker** using the Docker runtime from the same
+repository and region:
 
 | Setting        | Value                             |
 | -------------- | --------------------------------- |
-| Runtime        | Node                              |
+| Runtime        | Docker                            |
 | Root Directory | `.` (the backend repository root) |
-| Build Command  | Same as the API Web Service       |
-| Start Command  | `node dist/worker.js`             |
+| Dockerfile Path | `./Dockerfile`                    |
+| Docker Command  | `node dist/worker.js`             |
 
 Copy the API's production environment variables to the worker, including the
 same `DATABASE_URL`, Redis connection settings, and JWT/provider credentials

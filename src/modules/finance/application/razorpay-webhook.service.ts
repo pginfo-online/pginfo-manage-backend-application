@@ -13,6 +13,7 @@ import {
 } from '../../communications/domain/notification.interfaces.js';
 import type { EnvConfig } from '../../../config/index.js';
 import { Prisma } from '@prisma/client';
+import { PaymentsService } from './payments.service.js';
 
 export interface RazorpayWebhookPayload {
   entity: string;
@@ -22,6 +23,16 @@ export interface RazorpayWebhookPayload {
   contains?: string[];
   created_at?: number;
   payload: {
+    payment_link?: {
+      entity: {
+        id: string;
+        reference_id?: string;
+        amount: number;
+        amount_paid?: number;
+        status?: string;
+        notes?: Record<string, string>;
+      };
+    };
     subscription?: {
       entity: {
         id: string;
@@ -84,6 +95,7 @@ export class RazorpayWebhookService {
     @Optional()
     @Inject(EMAIL_ADAPTER)
     private readonly emailAdapter?: EmailAdapter,
+    @Optional() private readonly paymentsService?: PaymentsService,
   ) {}
 
   private getPlatformFeePaise(): number {
@@ -124,7 +136,7 @@ export class RazorpayWebhookService {
       where: { eventId },
     });
 
-    if (existingEvent) {
+    if (existingEvent && existingEvent.status !== 'FAILED') {
       this.logger.log(
         `Webhook event ${eventId} (${event.event}) already processed. Skipping idempotently.`,
       );
@@ -142,6 +154,19 @@ export class RazorpayWebhookService {
     try {
       // 4. Route event to specific handler
       switch (event.event) {
+        case 'payment_link.paid': {
+          const link = event.payload.payment_link?.entity;
+          const paid = event.payload.payment?.entity;
+          if (link && paid && paid.status === 'captured')
+            await this.paymentsService?.captureOnlinePayment({
+              linkId: link.id,
+              referenceId: link.reference_id,
+              gatewayPaymentId: paid.id,
+              amount: paid.amount,
+              currency: paid.currency,
+            });
+          break;
+        }
         case 'subscription.authenticated':
         case 'order.authorized':
           await this.handleSubscriptionAuthenticated(event);
@@ -176,14 +201,20 @@ export class RazorpayWebhookService {
       }
 
       // 5. Record successful event in WebhookEvent table for idempotency
-      await this.prisma.webhookEvent.create({
+      const successEvent = {
         data: {
           eventId,
           eventType: event.event,
           payload: event as unknown as Prisma.InputJsonValue,
           status: 'SUCCESS',
         },
-      });
+      };
+      if (existingEvent?.status === 'FAILED')
+        await this.prisma.webhookEvent.update({
+          where: { eventId },
+          data: { status: 'SUCCESS', error: null, processedAt: new Date() },
+        });
+      else await this.prisma.webhookEvent.create(successEvent);
 
       return { received: true, event: event.event, eventId };
     } catch (err: unknown) {
@@ -794,32 +825,12 @@ export class RazorpayWebhookService {
    */
   private async handleOneTimePaymentCaptured(event: RazorpayWebhookPayload) {
     const p = event.payload.payment?.entity;
-    if (!p) return;
-
-    const payment = await this.prisma.payment.findFirst({
-      where: { razorpayOrderId: p.order_id },
+    if (!p?.order_id || p.status !== 'captured') return;
+    await this.paymentsService?.captureOnlinePayment({
+      orderId: p.order_id,
+      gatewayPaymentId: p.id,
+      amount: p.amount,
+      currency: p.currency,
     });
-
-    if (payment && payment.status !== 'CONFIRMED') {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: 'CONFIRMED',
-            razorpayPaymentId: p.id,
-          },
-        });
-
-        if (payment.billingRecordId) {
-          await tx.billingRecord.update({
-            where: { id: payment.billingRecordId },
-            data: {
-              status: 'PAID',
-              paidAmount: payment.amount,
-            },
-          });
-        }
-      });
-    }
   }
 }

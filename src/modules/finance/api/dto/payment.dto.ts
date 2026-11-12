@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { calendarDateSchema } from '../../../../common/validation/date.js';
 import { PaymentMode, PaymentStatus } from '@prisma/client';
+import { moneyDate } from './money.dto.js';
 
 export const recordPaymentSchema = z.object({
   residentId: z.string().uuid(),
@@ -7,11 +9,15 @@ export const recordPaymentSchema = z.object({
   amount: z.coerce
     .number()
     .int()
-    .positive('Payment amount must be positive paise'),
-  mode: z.nativeEnum(PaymentMode),
-  collectionDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'collectionDate must be YYYY-MM-DD')
+    .positive('Payment amount must be positive paise')
+    .max(2147483647),
+  mode: z
+    .nativeEnum(PaymentMode)
+    .refine(
+      (m) => m !== 'RAZORPAY',
+      'Use the verified gateway flow for online payments',
+    ),
+  collectionDate: calendarDateSchema
     .default(() => new Date().toISOString().slice(0, 10))
     .transform((d) => new Date(d)),
   reference: z.string().trim().optional(),
@@ -42,6 +48,8 @@ export type VerifyRazorpayPaymentDto = z.infer<
 >;
 
 export const queryPaymentsSchema = z.object({
+  startDate: moneyDate.optional(),
+  endDate: moneyDate.optional(),
   residentId: z.string().uuid().optional(),
   propertyId: z.string().uuid().optional(),
   status: z.nativeEnum(PaymentStatus).optional(),

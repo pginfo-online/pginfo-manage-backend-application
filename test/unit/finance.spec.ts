@@ -70,6 +70,11 @@ describe('BillingService Idempotency', () => {
 
   beforeEach(() => {
     mockPrisma = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([
+          { generatedCount: 0, skippedCount: 1, totalAmount: 0 },
+        ]),
       resident: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -108,6 +113,10 @@ describe('BillingService Idempotency', () => {
 
     expect(result.generatedCount).toBe(0);
     expect(result.skippedCount).toBe(1);
+    expect(mockPrisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(mockPrisma.$queryRaw.mock.calls[0][0].sql).toContain(
+      'ON CONFLICT DO NOTHING',
+    );
     expect(mockPrisma.billingRecord.create).not.toHaveBeenCalled();
   });
 });
