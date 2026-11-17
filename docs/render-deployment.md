@@ -34,14 +34,15 @@ service listens on Render's `PORT` and binds to `0.0.0.0`.
 Configure Render's **Pre-Deploy Command** as:
 
 ```sh
-pnpm exec prisma migrate deploy
+node node_modules/prisma/build/index.js migrate deploy
 ```
 
 This applies checked-in Prisma migrations before the new API version receives
-traffic. Do not use `prisma migrate dev` or `prisma db push` in production.
-Render availability for pre-deploy commands depends on the service plan. If
-your plan does not provide this setting, run `pnpm exec prisma migrate deploy`
-once as a controlled release step using the same build and production database
+traffic, without invoking pnpm/Corepack or attempting to write the lockfile in
+the runtime image. Do not use `prisma migrate dev` or `prisma db push` in
+production. Render availability for pre-deploy commands depends on the service
+plan. If your plan does not provide this setting, run the same command once as
+a controlled release step using the same build and production database
 environment before deploying the API. Avoid putting migrations in the start
 command, which can run concurrently when multiple instances start.
 
