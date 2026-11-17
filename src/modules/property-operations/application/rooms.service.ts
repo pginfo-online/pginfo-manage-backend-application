@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import { Prisma } from '@prisma/client';
+import { REDIS_CLIENT } from '../../../platform/cache/index.js';
+import type { Redis } from 'ioredis';
 import type {
   CreateRoomDto,
   UpdateRoomDto,
@@ -15,11 +17,67 @@ import type {
 export class RoomsService {
   private readonly logger = new Logger(RoomsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis,
+  ) {}
+
+  private async getCached<T>(key: string): Promise<T | null> {
+    if (!this.redis) return null;
+    try {
+      const data = await this.redis.get(key);
+      return data ? (JSON.parse(data) as T) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setCached(key: string, data: any, ttlSeconds = 180): Promise<void> {
+    if (!this.redis) return;
+    try {
+      await this.redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
+    } catch (err: any) {
+      this.logger.warn(`Redis set error for ${key}: ${err.message}`);
+    }
+  }
+
+  async invalidateRoomCache(propertyId: string): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const keys = await this.redis.keys(`property:rooms:${propertyId}:*`);
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+      const statKeys = await this.redis.keys(`property:stats:${propertyId}*`);
+      if (statKeys.length > 0) {
+        await this.redis.del(...statKeys);
+      }
+      const orgKeys = await this.redis.keys(`org:properties:*`);
+      if (orgKeys.length > 0) {
+        await this.redis.del(...orgKeys);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Redis invalidation error: ${err.message}`);
+    }
+  }
+
+  private logAudit(data: {
+    organizationId: string;
+    userId: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+  }) {
+    if (this.prisma.auditLog?.create) {
+      void Promise.resolve(this.prisma.auditLog.create({ data })).catch((err: any) =>
+        this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
+      );
+    }
+  }
 
   /**
    * Creates a room within a property. If initialBedCount is specified,
-   * automatically creates the initial beds.
+   * automatically creates the initial beds in a single atomic transaction.
    */
   async create(
     propertyId: string,
@@ -50,96 +108,96 @@ export class RoomsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const room = await tx.room.create({
-        data: {
-          propertyId,
-          organizationId: orgId,
-          roomNumber: dto.roomNumber,
-          floor: dto.floor,
-          sharingType: dto.sharingType,
-          rentAmount: dto.rentAmount,
-          amenities: dto.amenities,
-          description: dto.description,
-          unitType: dto.unitType || 'Room',
-          gender: dto.gender || 'UNISEX',
-          remarks: dto.remarks,
-          lockInPeriod: dto.lockInPeriod || 'No Lock-in',
-          isDisabledForRent: dto.isDisabledForRent ?? false,
-          isPublished: dto.isPublished ?? true,
-          images: dto.images ?? [],
-          isVerified: dto.isVerified ?? true,
-          availableFrom: dto.availableFrom,
+    const bedNames =
+      dto.bedNames && dto.bedNames.length > 0
+        ? dto.bedNames
+        : dto.initialBedCount && dto.initialBedCount > 0
+          ? Array.from({ length: dto.initialBedCount }, (_, i) => {
+              const bedLetters = [
+                'A',
+                'B',
+                'C',
+                'D',
+                'E',
+                'F',
+                'G',
+                'H',
+                'I',
+                'J',
+                'K',
+                'L',
+              ];
+              return `Bed${bedLetters[i] ?? `${i + 1}`}`;
+            })
+          : [];
+
+    const bedsData = bedNames.map((name) => ({
+      organizationId: orgId,
+      bedNumber: name,
+      status: 'AVAILABLE' as const,
+      rentAmount:
+        dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
+    }));
+
+    const room = await this.prisma.room.create({
+      data: {
+        propertyId,
+        organizationId: orgId,
+        roomNumber: dto.roomNumber,
+        floor: dto.floor,
+        sharingType: dto.sharingType,
+        rentAmount: dto.rentAmount,
+        amenities: dto.amenities,
+        description: dto.description,
+        unitType: dto.unitType || 'Room',
+        gender: dto.gender || 'UNISEX',
+        remarks: dto.remarks,
+        lockInPeriod: dto.lockInPeriod || 'No Lock-in',
+        dailyStayMinPaise: dto.dailyStayMinPaise,
+        dailyStayMaxPaise: dto.dailyStayMaxPaise,
+        areaSqft: dto.areaSqft,
+        isDisabledForRent: dto.isDisabledForRent ?? false,
+        isPublished: dto.isPublished ?? true,
+        images: dto.images ?? [],
+        isVerified: dto.isVerified ?? true,
+        availableFrom: dto.availableFrom,
+        beds: bedsData.length > 0 ? { create: bedsData } : undefined,
+      },
+      include: {
+        beds: {
+          where: { status: { not: 'ARCHIVED' } },
+          select: { id: true, bedNumber: true, status: true, rentAmount: true },
+          orderBy: { bedNumber: 'asc' },
         },
-      });
-
-      const bedNames =
-        dto.bedNames && dto.bedNames.length > 0
-          ? dto.bedNames
-          : dto.initialBedCount && dto.initialBedCount > 0
-            ? Array.from({ length: dto.initialBedCount }, (_, i) => {
-                const bedLetters = [
-                  'A',
-                  'B',
-                  'C',
-                  'D',
-                  'E',
-                  'F',
-                  'G',
-                  'H',
-                  'I',
-                  'J',
-                  'K',
-                  'L',
-                ];
-                return `Bed${bedLetters[i] ?? `${i + 1}`}`;
-              })
-            : [];
-
-      let createdBeds: Awaited<ReturnType<typeof tx.bed.createManyAndReturn>> =
-        [];
-      if (bedNames.length > 0) {
-        const bedsData = bedNames.map((name) => ({
-          roomId: room.id,
-          organizationId: orgId,
-          bedNumber: name,
-          status: 'AVAILABLE' as const,
-          rentAmount:
-            dto.bedRents && dto.bedRents[name] ? dto.bedRents[name] : null,
-        }));
-
-        createdBeds = await tx.bed.createManyAndReturn({ data: bedsData });
-      }
-
-      await tx.auditLog.create({
-        data: {
-          organizationId: orgId,
-          userId,
-          action: 'room.create',
-          entityType: 'Room',
-          entityId: room.id,
-        },
-      });
-
-      return { ...room, beds: createdBeds };
+      },
     });
+
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'room.create',
+      entityType: 'Room',
+      entityId: room.id,
+    });
+
+    await this.invalidateRoomCache(propertyId);
+
+    return room;
   }
 
   /**
-   * Lists all rooms in a property with beds.
+   * Lists all rooms in a property with beds (cached for speed, lean queries).
    */
   async findAll(propertyId: string, orgId: string, query?: QueryRoomsDto) {
-    const property = await this.prisma.property.findFirst({
-      where: { id: propertyId, organizationId: orgId },
-      select: { id: true },
-    });
-
-    if (!property) {
-      throw new NotFoundError('Property', propertyId);
+    const cacheKey = `property:rooms:${propertyId}:${JSON.stringify(query || {})}`;
+    const cached = await this.getCached<any>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const where: Prisma.RoomWhereInput = {
       propertyId,
+      organizationId: orgId,
       status: query?.status ?? { not: 'ARCHIVED' },
       ...(query?.sharingType ? { sharingType: query.sharingType } : {}),
       ...(query?.gender ? { gender: query.gender } : {}),
@@ -160,6 +218,7 @@ export class RoomsService {
             }
           : {}),
     };
+
     const [rooms, total] = await Promise.all([
       this.prisma.room.findMany({
         where,
@@ -177,9 +236,14 @@ export class RoomsService {
       }),
       this.prisma.room.count({ where }),
     ]);
-    return query
+
+    const result = query
       ? buildOffsetResponse(rooms, total, query.page, query.limit)
       : rooms;
+
+    await this.setCached(cacheKey, result, 180);
+
+    return result;
   }
 
   /**
@@ -243,6 +307,7 @@ export class RoomsService {
   async update(id: string, dto: UpdateRoomDto, orgId: string, userId: string) {
     const room = await this.prisma.room.findFirst({
       where: { id, organizationId: orgId },
+      select: { id: true, propertyId: true, roomNumber: true },
     });
 
     if (!room) {
@@ -257,6 +322,7 @@ export class RoomsService {
             roomNumber: dto.roomNumber,
           },
         },
+        select: { id: true },
       });
       if (existing) {
         throw new ConflictError(
@@ -268,18 +334,24 @@ export class RoomsService {
     const updated = await this.prisma.room.update({
       where: { id },
       data: dto,
-      include: { beds: true },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'room.update',
-        entityType: 'Room',
-        entityId: id,
+      include: {
+        beds: {
+          where: { status: { not: 'ARCHIVED' } },
+          select: { id: true, bedNumber: true, status: true },
+          orderBy: { bedNumber: 'asc' },
+        },
       },
     });
+
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'room.update',
+      entityType: 'Room',
+      entityId: id,
+    });
+
+    await this.invalidateRoomCache(room.propertyId);
 
     return updated;
   }
@@ -288,20 +360,22 @@ export class RoomsService {
    * Archives a room (soft delete).
    */
   async archive(id: string, orgId: string, userId: string) {
-    const room = await this.prisma.room.findFirst({
-      where: { id, organizationId: orgId },
-    });
+    const [room, activeResidents] = await Promise.all([
+      this.prisma.room.findFirst({
+        where: { id, organizationId: orgId },
+        select: { id: true, propertyId: true },
+      }),
+      this.prisma.resident.count({
+        where: {
+          roomId: id,
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+        },
+      }),
+    ]);
 
     if (!room) {
       throw new NotFoundError('Room', id);
     }
-
-    const activeResidents = await this.prisma.resident.count({
-      where: {
-        roomId: id,
-        status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
-      },
-    });
 
     if (activeResidents > 0) {
       throw new ConflictError(
@@ -314,15 +388,15 @@ export class RoomsService {
       data: { status: 'ARCHIVED' },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'room.archive',
-        entityType: 'Room',
-        entityId: id,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'room.archive',
+      entityType: 'Room',
+      entityId: id,
     });
+
+    await this.invalidateRoomCache(room.propertyId);
 
     return { success: true, message: 'Room archived successfully' };
   }
@@ -338,6 +412,7 @@ export class RoomsService {
   ) {
     const room = await this.prisma.room.findFirst({
       where: { id: roomId, organizationId: orgId },
+      select: { id: true, roomNumber: true, propertyId: true },
     });
 
     if (!room) {
@@ -351,6 +426,7 @@ export class RoomsService {
           bedNumber: dto.bedNumber,
         },
       },
+      select: { id: true },
     });
 
     if (existing) {
@@ -370,15 +446,15 @@ export class RoomsService {
       },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'bed.create',
-        entityType: 'Bed',
-        entityId: bed.id,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'bed.create',
+      entityType: 'Bed',
+      entityId: bed.id,
     });
+
+    await this.invalidateRoomCache(room.propertyId);
 
     return bed;
   }
@@ -394,7 +470,7 @@ export class RoomsService {
   ) {
     const bed = await this.prisma.bed.findFirst({
       where: { id: bedId, organizationId: orgId },
-      include: { room: true },
+      include: { room: { select: { id: true, propertyId: true } } },
     });
 
     if (!bed) {
@@ -409,6 +485,7 @@ export class RoomsService {
             bedNumber: dto.bedNumber,
           },
         },
+        select: { id: true },
       });
       if (existing) {
         throw new ConflictError(
@@ -422,15 +499,15 @@ export class RoomsService {
       data: dto,
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'bed.update',
-        entityType: 'Bed',
-        entityId: bedId,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'bed.update',
+      entityType: 'Bed',
+      entityId: bedId,
     });
+
+    await this.invalidateRoomCache(bed.room.propertyId);
 
     return updated;
   }
@@ -439,20 +516,23 @@ export class RoomsService {
    * Archives a bed.
    */
   async archiveBed(bedId: string, orgId: string, userId: string) {
-    const bed = await this.prisma.bed.findFirst({
-      where: { id: bedId, organizationId: orgId },
-    });
+    const [bed, activeResident] = await Promise.all([
+      this.prisma.bed.findFirst({
+        where: { id: bedId, organizationId: orgId },
+        include: { room: { select: { id: true, propertyId: true } } },
+      }),
+      this.prisma.resident.findFirst({
+        where: {
+          bedId,
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+        },
+        select: { firstName: true },
+      }),
+    ]);
 
     if (!bed) {
       throw new NotFoundError('Bed', bedId);
     }
-
-    const activeResident = await this.prisma.resident.findFirst({
-      where: {
-        bedId,
-        status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
-      },
-    });
 
     if (activeResident) {
       throw new ConflictError(
@@ -465,15 +545,15 @@ export class RoomsService {
       data: { status: 'ARCHIVED' },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'bed.archive',
-        entityType: 'Bed',
-        entityId: bedId,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'bed.archive',
+      entityType: 'Bed',
+      entityId: bedId,
     });
+
+    await this.invalidateRoomCache(bed.room.propertyId);
 
     return { success: true, message: 'Bed archived successfully' };
   }
@@ -484,6 +564,7 @@ export class RoomsService {
   async toggleDisableRent(id: string, orgId: string, userId: string) {
     const room = await this.prisma.room.findFirst({
       where: { id, organizationId: orgId },
+      select: { id: true, isDisabledForRent: true, propertyId: true },
     });
 
     if (!room) {
@@ -493,20 +574,26 @@ export class RoomsService {
     const updated = await this.prisma.room.update({
       where: { id },
       data: { isDisabledForRent: !room.isDisabledForRent },
-      include: { beds: true },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: updated.isDisabledForRent
-          ? 'room.disable_rent'
-          : 'room.enable_rent',
-        entityType: 'Room',
-        entityId: id,
+      include: {
+        beds: {
+          where: { status: { not: 'ARCHIVED' } },
+          select: { id: true, bedNumber: true, status: true },
+          orderBy: { bedNumber: 'asc' },
+        },
       },
     });
+
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: updated.isDisabledForRent
+        ? 'room.disable_rent'
+        : 'room.enable_rent',
+      entityType: 'Room',
+      entityId: id,
+    });
+
+    await this.invalidateRoomCache(room.propertyId);
 
     return updated;
   }
@@ -517,6 +604,7 @@ export class RoomsService {
   async togglePublish(id: string, orgId: string, userId: string) {
     const room = await this.prisma.room.findFirst({
       where: { id, organizationId: orgId },
+      select: { id: true, isPublished: true, propertyId: true },
     });
 
     if (!room) {
@@ -526,18 +614,24 @@ export class RoomsService {
     const updated = await this.prisma.room.update({
       where: { id },
       data: { isPublished: !room.isPublished },
-      include: { beds: true },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: updated.isPublished ? 'room.publish' : 'room.unpublish',
-        entityType: 'Room',
-        entityId: id,
+      include: {
+        beds: {
+          where: { status: { not: 'ARCHIVED' } },
+          select: { id: true, bedNumber: true, status: true },
+          orderBy: { bedNumber: 'asc' },
+        },
       },
     });
+
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: updated.isPublished ? 'room.publish' : 'room.unpublish',
+      entityType: 'Room',
+      entityId: id,
+    });
+
+    await this.invalidateRoomCache(room.propertyId);
 
     return updated;
   }
@@ -547,49 +641,59 @@ export class RoomsService {
    * Covers all 17 KPI metrics required for production-scale management.
    */
   async getInventoryStats(propertyId: string, orgId: string) {
+    const cacheKey = `property:stats:${propertyId}`;
+    const cached = await this.getCached<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const property = await this.prisma.property.findFirst({
       where: { id: propertyId, organizationId: orgId },
+      select: { id: true },
     });
 
     if (!property) {
       throw new NotFoundError('Property', propertyId);
     }
 
-    const rooms = await this.prisma.room.findMany({
-      where: { propertyId, status: { not: 'ARCHIVED' } },
-      include: {
-        beds: {
-          where: { status: { not: 'ARCHIVED' } },
+    const [rooms, confirmedBookingsCount, pendingResidentsCount] =
+      await Promise.all([
+        this.prisma.room.findMany({
+          where: { propertyId, organizationId: orgId, status: { not: 'ARCHIVED' } },
           include: {
-            residents: {
-              where: {
-                status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+            beds: {
+              where: { status: { not: 'ARCHIVED' } },
+              include: {
+                residents: {
+                  where: {
+                    status: {
+                      in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                    },
+                  },
+                },
+                bookings: {
+                  where: { status: { in: ['CONFIRMED'] } },
+                },
               },
             },
-            bookings: {
-              where: { status: { in: ['CONFIRMED'] } },
-            },
           },
-        },
-      },
-    });
+        }),
+        this.prisma.booking.count({
+          where: {
+            propertyId,
+            organizationId: orgId,
+            status: 'CONFIRMED',
+          },
+        }),
+        this.prisma.resident.count({
+          where: {
+            propertyId,
+            organizationId: orgId,
+            status: 'PENDING_MOVE_IN',
+          },
+        }),
+      ]);
 
-    const [confirmedBookingsCount, pendingResidentsCount] = await Promise.all([
-      this.prisma.booking.count({
-        where: {
-          propertyId,
-          organizationId: orgId,
-          status: 'CONFIRMED',
-        },
-      }),
-      this.prisma.resident.count({
-        where: {
-          propertyId,
-          organizationId: orgId,
-          status: 'PENDING_MOVE_IN',
-        },
-      }),
-    ]);
     const newBookingsCount =
       (confirmedBookingsCount || 0) + (pendingResidentsCount || 0);
 
@@ -697,7 +801,7 @@ export class RoomsService {
       }
     }
 
-    return {
+    const result = {
       totalRooms: rooms.length,
       totalBeds,
       vacantRooms,
@@ -716,5 +820,9 @@ export class RoomsService {
       disabledForRent,
       disabledForRentBeds,
     };
+
+    await this.setCached(cacheKey, result, 60);
+
+    return result;
   }
 }

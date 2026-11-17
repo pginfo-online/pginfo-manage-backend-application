@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, Optional } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -8,12 +8,15 @@ import type {
 } from '../../common/types/index.js';
 import type { EnvConfig } from '../../config/index.js';
 import { PrismaService } from '../database/index.js';
+import { REDIS_CLIENT } from '../cache/index.js';
+import type { Redis } from 'ioredis';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     config: ConfigService<EnvConfig, true>,
     private readonly prisma: PrismaService,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -29,6 +32,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
    * that will be injected into request.user.
    */
   async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    const cacheKey = `auth:user:${payload.sub}:${payload.orgId ?? 'none'}`;
+    if (this.redis) {
+      try {
+        const cached = await this.redis.get(cacheKey);
+        if (cached) {
+          return JSON.parse(cached) as AuthenticatedUser;
+        }
+      } catch {
+        // Fall back to database on cache error
+      }
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
       select: {
@@ -59,7 +74,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user?.isActive) {
       throw new UnauthorizedException('User account is inactive');
     }
-    return {
+    const authenticatedUser: AuthenticatedUser = {
       id: user.id,
       email: user.email,
       organizationId: payload.orgId,
@@ -73,5 +88,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
           }
         : undefined,
     };
+
+    if (this.redis) {
+      try {
+        await this.redis.set(cacheKey, JSON.stringify(authenticatedUser), 'EX', 60);
+      } catch {
+        // Ignore cache write error
+      }
+    }
+
+    return authenticatedUser;
   }
 }

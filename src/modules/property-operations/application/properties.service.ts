@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError, ConflictError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
+import { REDIS_CLIENT } from '../../../platform/cache/index.js';
+import type { Redis } from 'ioredis';
 import type {
   CreatePropertyDto,
   UpdatePropertyDto,
@@ -14,7 +16,55 @@ import { Prisma } from '@prisma/client';
 export class PropertiesService {
   private readonly logger = new Logger(PropertiesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis,
+  ) {}
+
+  private async getCached<T>(key: string): Promise<T | null> {
+    if (!this.redis) return null;
+    try {
+      const data = await this.redis.get(key);
+      return data ? (JSON.parse(data) as T) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async setCached(key: string, data: any, ttlSeconds = 60): Promise<void> {
+    if (!this.redis) return;
+    try {
+      await this.redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
+    } catch (err: any) {
+      this.logger.warn(`Redis set error for ${key}: ${err.message}`);
+    }
+  }
+
+  async invalidatePropertyCache(orgId: string): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const keys = await this.redis.keys(`org:properties:${orgId}*`);
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } catch (err: any) {
+      this.logger.warn(`Redis invalidation error: ${err.message}`);
+    }
+  }
+
+  private logAudit(data: {
+    organizationId: string;
+    userId: string;
+    action: string;
+    entityType: string;
+    entityId: string;
+  }) {
+    if (this.prisma.auditLog?.create) {
+      void Promise.resolve(this.prisma.auditLog.create({ data })).catch((err: any) =>
+        this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
+      );
+    }
+  }
 
   /**
    * Creates a new property scoped to the organization.
@@ -27,6 +77,7 @@ export class PropertiesService {
           name: dto.name,
         },
       },
+      select: { id: true },
     });
 
     if (existing) {
@@ -42,16 +93,15 @@ export class PropertiesService {
       },
     });
 
-    // Audit log
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'property.create',
-        entityType: 'Property',
-        entityId: property.id,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'property.create',
+      entityType: 'Property',
+      entityId: property.id,
     });
+
+    await this.invalidatePropertyCache(orgId);
 
     this.logger.log(
       `Created property '${property.name}' (${property.id}) in org ${orgId}`,
@@ -63,6 +113,12 @@ export class PropertiesService {
    * Lists all properties in an organization with filters and pagination.
    */
   async findAll(orgId: string, query: QueryPropertiesDto) {
+    const cacheKey = `org:properties:${orgId}:${JSON.stringify(query || {})}`;
+    const cached = await this.getCached<any>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const where: Prisma.PropertyWhereInput = {
       organizationId: orgId,
       ...(query.status
@@ -207,7 +263,9 @@ export class PropertiesService {
       };
     });
 
-    return buildOffsetResponse(formatted, total, query.page, query.limit);
+    const result = buildOffsetResponse(formatted, total, query.page, query.limit);
+    await this.setCached(cacheKey, result, 60);
+    return result;
   }
 
   /**
@@ -316,15 +374,15 @@ export class PropertiesService {
       data: dto,
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'property.update',
-        entityType: 'Property',
-        entityId: id,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'property.update',
+      entityType: 'Property',
+      entityId: id,
     });
+
+    await this.invalidatePropertyCache(orgId);
 
     return updated;
   }
@@ -360,15 +418,15 @@ export class PropertiesService {
       data: { status: 'ARCHIVED' },
     });
 
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'property.archive',
-        entityType: 'Property',
-        entityId: id,
-      },
+    this.logAudit({
+      organizationId: orgId,
+      userId,
+      action: 'property.archive',
+      entityType: 'Property',
+      entityId: id,
     });
+
+    await this.invalidatePropertyCache(orgId);
 
     return { success: true, message: 'Property archived successfully' };
   }

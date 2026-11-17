@@ -357,6 +357,9 @@ model Room {
   gender            String      @default("UNISEX") @map("gender") // "MALE", "FEMALE", "UNISEX"
   remarks           String?     @map("remarks")
   lockInPeriod      String?     @default("No Lock-in") @map("lock_in_period")
+  dailyStayMinPaise Int?        @map("daily_stay_min_paise")
+  dailyStayMaxPaise Int?        @map("daily_stay_max_paise")
+  areaSqft          Int?        @map("area_sqft")
   isDisabledForRent Boolean     @default(false) @map("is_disabled_for_rent")
   isPublished       Boolean     @default(true) @map("is_published")
   images            String[]    @default([]) @map("images")
