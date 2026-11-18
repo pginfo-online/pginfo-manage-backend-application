@@ -1,0 +1,114 @@
+name: pginfo-prod
+
+x-app: &app
+  image: pginfo-backend:${RELEASE_TAG:?Set a unique RELEASE_TAG in .env.compose}
+  restart: unless-stopped
+  labels:
+    com.centurylinklabs.watchtower.enable: 'false'
+  env_file:
+    - path: .env.production
+      format: raw
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 150
+  mem_limit: 512m
+  cpus: 0.75
+  stop_grace_period: 45s
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+  networks: [pginfo]
+  depends_on:
+    redis:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: [dumb-init, node, dist/main.js]
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_TLS_ENABLED: 'false'
+    ports:
+      - '127.0.0.1:${PGINFO_API_PORT:-3109}:3000'
+    volumes:
+      - ./deploy/certs:/app/deploy/certs:ro
+      - ./deploy/service-health.mjs:/app/deploy/service-health.mjs:ro
+      - ./deploy/verify-runtime.mjs:/app/deploy/verify-runtime.mjs:ro
+      - ./deploy/audit-database.mjs:/app/deploy/audit-database.mjs:ro
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, api]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 45s
+
+  worker:
+    <<: *app
+    command: [dumb-init, node, dist/worker.js]
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      REDIS_TLS_ENABLED: 'false'
+    volumes:
+      - ./deploy/certs:/app/deploy/certs:ro
+      - ./deploy/service-health.mjs:/app/deploy/service-health.mjs:ro
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, worker]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 45s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    labels:
+      com.centurylinklabs.watchtower.enable: 'false'
+    # Dedicated network, no host port. Never connect this app to another app's Redis.
+    command: [redis-server, /usr/local/etc/redis/redis.conf]
+    volumes:
+      - redis-data:/data
+      - ./deploy/secrets/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      REDISCLI_AUTH_FILE: /run/secrets/redis_password
+    secrets: [redis_password]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$(cat /run/secrets/redis_password) redis-cli ping | grep -qx PONG']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    cpus: 0.25
+    pids_limit: 100
+    security_opt: [no-new-privileges:true]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+    networks: [pginfo]
+
+networks:
+  pginfo:
+    driver: bridge
+
+volumes:
+  redis-data:
+
+secrets:
+  redis_password:
+    file: ./deploy/secrets/redis_password

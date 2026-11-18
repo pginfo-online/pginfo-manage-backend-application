@@ -4,6 +4,9 @@
 
 ---
 
+Production updates are deployed automatically from `main` after CI and container
+smoke tests pass. See [CI/CD and rollback instructions](docs/cicd.md).
+
 ## 1. Overview & Architecture
 
 PgInfo is built as a **Modular Monolith** in TypeScript using **NestJS**, **Prisma ORM**, **PostgreSQL** (hosted on Supabase or self-hosted), and **Redis** (caching and BullMQ background workers).

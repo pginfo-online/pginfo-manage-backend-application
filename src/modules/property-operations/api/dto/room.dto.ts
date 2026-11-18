@@ -15,8 +15,18 @@ export const createRoomSchema = z.object({
   gender: z.string().trim().default('UNISEX'),
   remarks: z.string().trim().optional(),
   lockInPeriod: z.string().trim().default('No Lock-in'),
-  dailyStayMinPaise: z.coerce.number().int().nonnegative().nullable().optional(),
-  dailyStayMaxPaise: z.coerce.number().int().nonnegative().nullable().optional(),
+  dailyStayMinPaise: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional(),
+  dailyStayMaxPaise: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional(),
   areaSqft: z.coerce.number().int().positive().nullable().optional(),
   isDisabledForRent: z.boolean().default(false),
   isPublished: z.boolean().default(true),
@@ -50,8 +60,18 @@ export const updateRoomSchema = z.object({
   gender: z.string().trim().optional(),
   remarks: z.string().trim().nullable().optional(),
   lockInPeriod: z.string().trim().optional(),
-  dailyStayMinPaise: z.coerce.number().int().nonnegative().nullable().optional(),
-  dailyStayMaxPaise: z.coerce.number().int().nonnegative().nullable().optional(),
+  dailyStayMinPaise: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional(),
+  dailyStayMaxPaise: z.coerce
+    .number()
+    .int()
+    .nonnegative()
+    .nullable()
+    .optional(),
   areaSqft: z.coerce.number().int().positive().nullable().optional(),
   isDisabledForRent: z.boolean().optional(),
   isPublished: z.boolean().optional(),

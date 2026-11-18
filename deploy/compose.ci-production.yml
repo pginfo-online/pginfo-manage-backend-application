@@ -1,0 +1,67 @@
+# Installed root-owned on the VPS. App releases cannot replace this security policy.
+name: pginfo-prod
+x-app: &app
+  image: pginfo-backend:${RELEASE_TAG:?Set an immutable release ID}
+  user: '1000:1000'
+  entrypoint: [dumb-init]
+  restart: unless-stopped
+  labels:
+    com.centurylinklabs.watchtower.enable: 'false'
+  env_file:
+    - path: /opt/pginfo/shared/.env.production
+      format: raw
+  environment:
+    NODE_ENV: production
+    PORT: '3000'
+    REDIS_HOST: redis
+    REDIS_PORT: '6379'
+    REDIS_TLS_ENABLED: 'false'
+  init: true
+  read_only: true
+  tmpfs: ['/tmp:size=64m,mode=1777']
+  volumes:
+    - /opt/pginfo/shared/certs:/app/deploy/certs:ro
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 150
+  mem_limit: 512m
+  cpus: 0.75
+  stop_grace_period: 45s
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+  networks: [pginfo]
+services:
+  api:
+    <<: *app
+    command: [node, dist/main.js]
+    ports: ['127.0.0.1:3109:3000']
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, api]
+      interval: 15s
+      timeout: 12s
+      retries: 4
+      start_period: 30s
+  worker:
+    <<: *app
+    command: [node, dist/worker.js]
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, worker]
+      interval: 15s
+      timeout: 12s
+      retries: 4
+      start_period: 30s
+  # Redis is retained across application deploys and is never recreated by CI/CD.
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    labels: {com.centurylinklabs.watchtower.enable: 'false'}
+    command: [redis-server, /usr/local/etc/redis/redis.conf]
+    volumes:
+      - redis-data:/data
+      - /opt/pginfo/shared/secrets/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks: [pginfo]
+networks:
+  pginfo: {driver: bridge}
+volumes:
+  redis-data:

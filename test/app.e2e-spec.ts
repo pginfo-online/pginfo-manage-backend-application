@@ -28,6 +28,14 @@ describe('HealthController (e2e)', () => {
       .expect({ status: 'ok' });
   });
 
+  it('/health/ready requires the disposable database to be healthy', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/health/ready')
+      .expect(200);
+    expect(response.body.status).toBe('ok');
+    expect(response.body.details.database.status).toBe('up');
+  });
+
   afterEach(async () => {
     await app.close();
   });

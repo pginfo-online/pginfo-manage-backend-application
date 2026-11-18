@@ -8,3 +8,7 @@ coverage
 .env
 .env.*
 docker-compose.yml
+deploy/secrets
+deploy/backups
+**/__pycache__
+*.pyc

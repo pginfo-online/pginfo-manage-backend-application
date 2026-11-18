@@ -75,7 +75,9 @@ export const envSchema = z.object({
   // ── CORS ─────────────────────────────────────────────────────
   CORS_ORIGINS: z
     .string()
-    .default('http://localhost:3000,http://localhost:5000,http://localhost:5173')
+    .default(
+      'http://localhost:3000,http://localhost:5000,http://localhost:5173',
+    )
     .transform((v) => v.split(',')),
 
   // ── Rate Limiting ────────────────────────────────────────────

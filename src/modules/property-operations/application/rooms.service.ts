@@ -32,7 +32,11 @@ export class RoomsService {
     }
   }
 
-  private async setCached(key: string, data: any, ttlSeconds = 180): Promise<void> {
+  private async setCached(
+    key: string,
+    data: any,
+    ttlSeconds = 180,
+  ): Promise<void> {
     if (!this.redis) return;
     try {
       await this.redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
@@ -69,8 +73,9 @@ export class RoomsService {
     entityId: string;
   }) {
     if (this.prisma.auditLog?.create) {
-      void Promise.resolve(this.prisma.auditLog.create({ data })).catch((err: any) =>
-        this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
+      void Promise.resolve(this.prisma.auditLog.create({ data })).catch(
+        (err: any) =>
+          this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
       );
     }
   }
@@ -659,7 +664,11 @@ export class RoomsService {
     const [rooms, confirmedBookingsCount, pendingResidentsCount] =
       await Promise.all([
         this.prisma.room.findMany({
-          where: { propertyId, organizationId: orgId, status: { not: 'ARCHIVED' } },
+          where: {
+            propertyId,
+            organizationId: orgId,
+            status: { not: 'ARCHIVED' },
+          },
           include: {
             beds: {
               where: { status: { not: 'ARCHIVED' } },

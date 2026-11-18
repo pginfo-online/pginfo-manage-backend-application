@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, Inject, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
@@ -91,7 +96,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     if (this.redis) {
       try {
-        await this.redis.set(cacheKey, JSON.stringify(authenticatedUser), 'EX', 60);
+        await this.redis.set(
+          cacheKey,
+          JSON.stringify(authenticatedUser),
+          'EX',
+          60,
+        );
       } catch {
         // Ignore cache write error
       }

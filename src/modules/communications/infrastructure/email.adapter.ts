@@ -22,6 +22,7 @@ export class ResendEmailAdapter implements EmailAdapter {
       try {
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST',
+          signal: AbortSignal.timeout(10_000),
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${apiKey}`,
@@ -49,6 +50,10 @@ export class ResendEmailAdapter implements EmailAdapter {
         );
         return { success: false, error: (err as Error).message };
       }
+    }
+
+    if (this.config.get('NODE_ENV') === 'production') {
+      return { success: false, error: 'Email provider is not configured' };
     }
 
     // Dev/Sandbox simulation

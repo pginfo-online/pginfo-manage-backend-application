@@ -1,0 +1,61 @@
+name: pginfo-ci-test
+
+x-app: &app
+  image: pginfo-backend:${RELEASE_TAG:?Set RELEASE_TAG}
+  environment:
+    NODE_ENV: production
+    PORT: '3000'
+    DATABASE_URL: postgresql://pginfo:ci-only-password@postgres:5432/pginfo_ci
+    REDIS_HOST: redis
+    REDIS_PORT: '6379'
+    JWT_SECRET: ci-only-access-secret-not-for-production-123456
+    JWT_REFRESH_SECRET: ci-only-refresh-secret-not-for-production-789012
+    CORS_ORIGINS: ''
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pginfo
+      POSTGRES_PASSWORD: ci-only-password
+      POSTGRES_DB: pginfo_ci
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U pginfo -d pginfo_ci']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --maxmemory-policy, noeviction]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate:
+    <<: *app
+    command: [node, node_modules/prisma/build/index.js, migrate, deploy]
+  api:
+    <<: *app
+    command: [dumb-init, node, dist/main.js]
+    ports: ['127.0.0.1:3189:3000']
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, api]
+      interval: 5s
+      timeout: 12s
+      retries: 20
+  worker:
+    <<: *app
+    command: [dumb-init, node, dist/worker.js]
+    healthcheck:
+      test: [CMD, node, deploy/service-health.mjs, worker]
+      interval: 5s
+      timeout: 12s
+      retries: 20

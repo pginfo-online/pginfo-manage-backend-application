@@ -29,7 +29,7 @@ FROM base AS production
 
 LABEL org.opencontainers.image.title="PgInfo Backend"
 LABEL org.opencontainers.image.description="PgInfo NestJS backend service"
-LABEL org.opencontainers.image.source="https://github.com/pginfo/backend"
+LABEL org.opencontainers.image.source="https://github.com/pginfo-online/pginfo-manage-backend-application"
 
 RUN apk add --no-cache dumb-init libstdc++
 
@@ -39,6 +39,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/deploy ./deploy
 
 USER node
 

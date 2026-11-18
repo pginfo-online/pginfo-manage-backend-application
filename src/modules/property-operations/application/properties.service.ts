@@ -31,7 +31,11 @@ export class PropertiesService {
     }
   }
 
-  private async setCached(key: string, data: any, ttlSeconds = 60): Promise<void> {
+  private async setCached(
+    key: string,
+    data: any,
+    ttlSeconds = 60,
+  ): Promise<void> {
     if (!this.redis) return;
     try {
       await this.redis.set(key, JSON.stringify(data), 'EX', ttlSeconds);
@@ -60,8 +64,9 @@ export class PropertiesService {
     entityId: string;
   }) {
     if (this.prisma.auditLog?.create) {
-      void Promise.resolve(this.prisma.auditLog.create({ data })).catch((err: any) =>
-        this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
+      void Promise.resolve(this.prisma.auditLog.create({ data })).catch(
+        (err: any) =>
+          this.logger.warn(`Failed to write audit log: ${err?.message ?? err}`),
       );
     }
   }
@@ -263,7 +268,12 @@ export class PropertiesService {
       };
     });
 
-    const result = buildOffsetResponse(formatted, total, query.page, query.limit);
+    const result = buildOffsetResponse(
+      formatted,
+      total,
+      query.page,
+      query.limit,
+    );
     await this.setCached(cacheKey, result, 60);
     return result;
   }
