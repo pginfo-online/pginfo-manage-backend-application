@@ -18,7 +18,38 @@ export class PrismaService
   private readonly logger = new Logger(PrismaService.name);
 
   constructor() {
+    let datasourceUrl: string | undefined = undefined;
+    const rawUrl = process.env['DATABASE_URL'];
+    if (rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        const isWorker =
+          process.env['IS_WORKER'] === 'true' ||
+          process.argv.some((arg) => arg.includes('worker'));
+
+        // Bound connection limits safely to prevent exceeding Supabase Supavisor pool limits (15 in session mode)
+        const existingLimit = parsed.searchParams.get('connection_limit');
+        if (isWorker) {
+          parsed.searchParams.set('connection_limit', '2');
+        } else if (!existingLimit || Number(existingLimit) > 5) {
+          parsed.searchParams.set('connection_limit', '4');
+        }
+
+        if (!parsed.searchParams.has('connect_timeout')) {
+          parsed.searchParams.set('connect_timeout', '15');
+        }
+        if (!parsed.searchParams.has('pool_timeout')) {
+          parsed.searchParams.set('pool_timeout', '30');
+        }
+
+        datasourceUrl = parsed.toString();
+      } catch {
+        // Fall back to Prisma schema default if URL parsing fails
+      }
+    }
+
     super({
+      ...(datasourceUrl ? { datasourceUrl } : {}),
       transactionOptions: {
         maxWait: 10_000,
         timeout: 30_000,
@@ -46,16 +77,22 @@ export class PrismaService
 
     this.logger.log('Connecting to database…');
     let connected = false;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         await this.$connect();
         connected = true;
         break;
       } catch (err: any) {
+        const isLast = attempt === maxAttempts;
         this.logger.warn(
-          `Database connect attempt ${attempt} failed: ${err.message}. Retrying in 1.5s...`,
+          `Database connect attempt ${attempt}/${maxAttempts} failed: ${err.message}.${
+            !isLast ? ` Retrying in ${attempt * 2}s...` : ''
+          }`,
         );
-        await new Promise((res) => setTimeout(res, 1500));
+        if (!isLast) {
+          await new Promise((res) => setTimeout(res, attempt * 2000));
+        }
       }
     }
     if (!connected) {

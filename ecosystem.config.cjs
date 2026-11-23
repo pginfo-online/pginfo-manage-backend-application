@@ -38,10 +38,11 @@ module.exports = {
       autorestart: true,
       max_memory_restart: '500M',
       kill_timeout: 15000,
-      restart_delay: 3000,
+      restart_delay: 5000,
       max_restarts: 10,
       env: {
         NODE_ENV: 'production',
+        IS_WORKER: 'true',
       },
       error_file: './logs/worker-err.log',
       out_file: './logs/worker-out.log',
