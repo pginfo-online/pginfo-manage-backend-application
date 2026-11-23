@@ -12,7 +12,7 @@ import {
 import { z } from 'zod';
 import { PLATFORM_PERMISSIONS } from '../../domain/admin-permissions.js';
 
-const page = z.coerce.number().int().min(1).default(1);
+const page = z.coerce.number().int().min(1).max(100_000).default(1);
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const search = z.string().trim().max(200).optional();
 const uuid = z.string().uuid();
@@ -24,22 +24,34 @@ const optionalBoolean = z.preprocess((value) => {
   return value;
 }, z.boolean().optional());
 
-export const adminDashboardQuerySchema = z
-  .object({
-    from: z.coerce.date().optional(),
-    to: z.coerce.date().optional(),
-    organizationId: uuid.optional(),
-  })
-  .superRefine((value, context) => {
-    if (value.from && value.to && value.from > value.to) {
-      context.addIssue({
-        code: 'custom',
-        message: 'from must be before or equal to to',
-        path: ['from'],
-      });
-    }
-  });
+const adminPeriodSchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  organizationId: uuid.optional(),
+});
+const validatePeriod = (
+  value: { from?: Date; to?: Date },
+  context: z.RefinementCtx,
+) => {
+  if (value.from && value.to && value.from > value.to) {
+    context.addIssue({
+      code: 'custom',
+      message: 'from must be before or equal to to',
+      path: ['from'],
+    });
+  }
+};
+export const adminDashboardQuerySchema =
+  adminPeriodSchema.superRefine(validatePeriod);
 export type AdminDashboardQueryDto = z.infer<typeof adminDashboardQuerySchema>;
+
+export const adminPortfolioQuerySchema = adminPeriodSchema
+  .extend({
+    page: z.coerce.number().int().min(1).max(100_000).optional(),
+    limit,
+  })
+  .superRefine(validatePeriod);
+export type AdminPortfolioQueryDto = z.infer<typeof adminPortfolioQuerySchema>;
 
 export const adminListQuerySchema = z.object({ page, limit, search });
 export type AdminListQueryDto = z.infer<typeof adminListQuerySchema>;
@@ -127,17 +139,19 @@ export type AdminAnnouncementsQueryDto = z.infer<
   typeof adminAnnouncementsQuerySchema
 >;
 
-export const adminPaymentsQuerySchema = adminListQuerySchema.extend({
-  organizationId: uuid.optional(),
-  status: z
-    .enum(['PENDING', 'CONFIRMED', 'FAILED', 'REFUNDED', 'DISPUTED'])
-    .optional(),
-  mode: z
-    .enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'RAZORPAY', 'OTHER'])
-    .optional(),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
-});
+export const adminPaymentsQuerySchema = adminListQuerySchema
+  .extend({
+    organizationId: uuid.optional(),
+    status: z
+      .enum(['PENDING', 'CONFIRMED', 'FAILED', 'REFUNDED', 'DISPUTED'])
+      .optional(),
+    mode: z
+      .enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'RAZORPAY', 'OTHER'])
+      .optional(),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+  })
+  .superRefine(validatePeriod);
 export type AdminPaymentsQueryDto = z.infer<typeof adminPaymentsQuerySchema>;
 
 export const adminPayoutsQuerySchema = adminListQuerySchema.extend({
@@ -152,15 +166,17 @@ export const adminPendingQuerySchema = z.object({
 });
 export type AdminPendingQueryDto = z.infer<typeof adminPendingQuerySchema>;
 
-export const adminAuditQuerySchema = adminListQuerySchema.extend({
-  organizationId: uuid.optional(),
-  userId: uuid.optional(),
-  action: z.string().trim().max(200).optional(),
-  entityType: z.string().trim().max(100).optional(),
-  entityId: z.string().trim().max(100).optional(),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
-});
+export const adminAuditQuerySchema = adminListQuerySchema
+  .extend({
+    organizationId: uuid.optional(),
+    userId: uuid.optional(),
+    action: z.string().trim().max(200).optional(),
+    entityType: z.string().trim().max(100).optional(),
+    entityId: z.string().trim().max(100).optional(),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+  })
+  .superRefine(validatePeriod);
 export type AdminAuditQueryDto = z.infer<typeof adminAuditQuerySchema>;
 
 export const adminCasesQuerySchema = adminListQuerySchema.extend({

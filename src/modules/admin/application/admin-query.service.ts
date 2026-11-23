@@ -256,11 +256,7 @@ export class AdminQueryService {
         (SELECT count(*) FROM "organizations" WHERE "is_active" = true ${organizationId}) AS active_organizations,
         (SELECT count(*) FROM "properties" WHERE true ${scoped}) AS total_properties,
         (SELECT count(*) FROM "rooms" WHERE true ${scoped}) AS total_rooms,
-        (SELECT coalesce(sum("amount"), 0) FROM "payments" WHERE "status" = 'CONFIRMED' AND "collection_date" BETWEEN ${from} AND ${to} ${scoped}) AS collected_paise,
-        (SELECT count(*) FROM "payments" WHERE "status" = 'CONFIRMED' AND "collection_date" BETWEEN ${from} AND ${to} ${scoped}) AS collections,
-        (SELECT coalesce(sum("amount"), 0) FROM "payments" WHERE "status" = 'PENDING' ${scoped}) AS pending_paise,
-        (SELECT count(*) FROM "payments" WHERE "status" = 'PENDING' ${scoped}) AS pending_payments,
-        (SELECT count(*) FROM "payments" WHERE "status" = 'DISPUTED' ${scoped}) AS disputed_payments,
+        payment_totals.*,
         (SELECT coalesce(sum("amount"), 0) FROM "expenses" WHERE "expense_date" BETWEEN ${from} AND ${to} ${scoped}) AS expenses_paise,
         (SELECT count(*) FROM "expenses" WHERE "expense_date" BETWEEN ${from} AND ${to} ${scoped}) AS expenses,
         (SELECT coalesce(sum("amount"), 0) FROM "rent_invoices" WHERE "status" != 'CANCELLED' AND "created_at" BETWEEN ${from} AND ${to} ${scoped}) AS gross_rent_paise,
@@ -287,6 +283,18 @@ export class AdminQueryService {
         coalesce((SELECT jsonb_object_agg(grouped.status, grouped.total) FROM (
           SELECT "status"::text AS status, count(*)::int AS total FROM "admin_cases" WHERE true ${scoped} GROUP BY "status"
         ) grouped), '{}'::jsonb) AS case_statuses
+      FROM (
+        SELECT
+          coalesce(sum("amount") FILTER (WHERE "status" = 'CONFIRMED'), 0) AS collected_paise,
+          count(*) FILTER (WHERE "status" = 'CONFIRMED') AS collections,
+          coalesce(sum("amount") FILTER (WHERE "status" = 'PENDING'), 0) AS pending_paise,
+          count(*) FILTER (WHERE "status" = 'PENDING') AS pending_payments,
+          count(*) FILTER (WHERE "status" = 'DISPUTED') AS disputed_payments
+        FROM "payments"
+        WHERE ("status" IN ('PENDING', 'DISPUTED') OR
+          ("status" = 'CONFIRMED' AND "collection_date" BETWEEN ${from} AND ${to}))
+          ${scoped}
+      ) payment_totals
     `);
     if (!snapshot) throw new Error('Dashboard snapshot query returned no row');
     const count = (value: bigint) => Number(value);
@@ -360,7 +368,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           email: true,
@@ -453,7 +461,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           _count: {
             select: {
@@ -547,6 +555,7 @@ export class AdminQueryService {
               { ownerName: { contains: query.search, mode: 'insensitive' } },
               { city: { contains: query.search, mode: 'insensitive' } },
               { pincode: { contains: query.search } },
+              { addressLine1: { contains: query.search, mode: 'insensitive' } },
             ],
           }
         : {}),
@@ -556,7 +565,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           organization: { select: { id: true, name: true, isActive: true } },
           _count: {
@@ -654,7 +663,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           property: {
             select: {
@@ -701,7 +710,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           room: {
             select: {
@@ -749,7 +758,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           property: { select: { id: true, name: true } },
           room: { select: { id: true, roomNumber: true } },
@@ -782,7 +791,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           property: { select: { id: true, name: true } },
           bed: {
@@ -824,7 +833,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [{ urgency: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           property: { select: { id: true, name: true } },
           room: { select: { id: true, roomNumber: true } },
@@ -871,7 +880,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: { property: { select: { id: true, name: true } } },
       }),
       this.prisma.announcement.count({ where }),
@@ -917,6 +926,18 @@ export class AdminQueryService {
                 },
               },
               { resident: { mobile: { contains: query.search } } },
+              {
+                resident: {
+                  lastName: { contains: query.search, mode: 'insensitive' },
+                },
+              },
+              {
+                resident: {
+                  property: {
+                    name: { contains: query.search, mode: 'insensitive' },
+                  },
+                },
+              },
             ],
           }
         : {}),
@@ -926,7 +947,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           organizationId: true,
@@ -1022,6 +1043,7 @@ export class AdminQueryService {
               },
               { email: { contains: query.search, mode: 'insensitive' } },
               { phone: { contains: query.search } },
+              { accountNumberMasked: { contains: query.search } },
               { razorpayAccountId: { contains: query.search } },
             ],
           }
@@ -1032,7 +1054,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           organizationId: true,
@@ -1084,7 +1106,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: {
           id: true,
           organizationId: true,
@@ -1128,7 +1150,7 @@ export class AdminQueryService {
       await this.prisma.$transaction([
         this.prisma.payment.findMany({
           where: { ...organization, status: { in: ['PENDING', 'DISPUTED'] } },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: 100,
           select: {
             id: true,
@@ -1143,7 +1165,7 @@ export class AdminQueryService {
         }),
         this.prisma.rentInvoice.findMany({
           where: { ...organization, status: { in: ['PENDING', 'FAILED'] } },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: 100,
           select: {
             id: true,
@@ -1167,7 +1189,7 @@ export class AdminQueryService {
               { kycStatus: { in: ['PENDING', 'SUBMITTED'] } },
             ],
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: 100,
           select: {
             id: true,
@@ -1229,7 +1251,7 @@ export class AdminQueryService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         include: {
           user: {
             select: { id: true, email: true, firstName: true, lastName: true },
@@ -1242,13 +1264,36 @@ export class AdminQueryService {
     return buildOffsetResponse(items, total, query.page, query.limit);
   }
 
-  async platformReport(query: AdminDashboardQueryDto) {
+  async platformReport(
+    query: AdminDashboardQueryDto & { page?: number; limit?: number },
+  ) {
     const from =
       query.from ?? new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1));
     const to = query.to ?? new Date();
-    const organization = query.organizationId
-      ? { organizationId: query.organizationId }
-      : {};
+    const where = query.organizationId ? { id: query.organizationId } : {};
+    const pageSize = query.limit ?? 20;
+    const organizationsQuery = this.prisma.organization.findMany({
+      where,
+      select: { id: true, name: true, slug: true, isActive: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      ...(query.page
+        ? { skip: (query.page - 1) * pageSize, take: pageSize }
+        : {}),
+    });
+    const [organizations, total] = await Promise.all([
+      organizationsQuery,
+      query.page ? this.prisma.organization.count({ where }) : undefined,
+    ]);
+    const meta =
+      query.page && total !== undefined
+        ? buildOffsetResponse([], total, query.page, pageSize).meta
+        : undefined;
+    if (!organizations.length)
+      return { period: { from, to }, organizations: [], ...(meta && { meta }) };
+    const organization =
+      query.page || query.organizationId
+        ? { organizationId: { in: organizations.map((item) => item.id) } }
+        : {};
     const [collections, expenses, dues, residents, properties] =
       await this.prisma.$transaction([
         this.prisma.payment.groupBy({
@@ -1289,34 +1334,25 @@ export class AdminQueryService {
           _count: true,
         }),
       ]);
-    const ids = [
-      ...new Set([
-        ...collections.map((item) => item.organizationId),
-        ...expenses.map((item) => item.organizationId),
-        ...dues.map((item) => item.organizationId),
-        ...residents.map((item) => item.organizationId),
-        ...properties.map((item) => item.organizationId),
-      ]),
-    ];
-    const organizations = await this.prisma.organization.findMany({
-      where: { id: { in: ids } },
-      select: { id: true, name: true, slug: true, isActive: true },
-    });
-    const byId = new Map(organizations.map((item) => [item.id, item]));
+    const byOrganization = <T extends { organizationId: string }>(rows: T[]) =>
+      new Map(rows.map((row) => [row.organizationId, row]));
+    const collectionByOrg = byOrganization(collections);
+    const expenseByOrg = byOrganization(expenses);
+    const dueByOrg = byOrganization(dues);
+    const residentsByOrg = byOrganization(residents);
+    const propertiesByOrg = byOrganization(properties);
     return {
       period: { from, to },
-      organizations: ids.map((id) => {
-        const collection = collections.find(
-          (item) => item.organizationId === id,
-        );
-        const expense = expenses.find((item) => item.organizationId === id);
-        const due = dues.find((item) => item.organizationId === id);
+      ...(meta && { meta }),
+      organizations: organizations.map((organization) => {
+        const { id } = organization;
+        const collection = collectionByOrg.get(id);
+        const expense = expenseByOrg.get(id);
+        const due = dueByOrg.get(id);
         return {
-          ...byId.get(id),
-          properties:
-            properties.find((item) => item.organizationId === id)?._count ?? 0,
-          residents:
-            residents.find((item) => item.organizationId === id)?._count ?? 0,
+          ...organization,
+          properties: propertiesByOrg.get(id)?._count ?? 0,
+          residents: residentsByOrg.get(id)?._count ?? 0,
           collections: collection?._count ?? 0,
           collectedPaise: collection?._sum.amount ?? 0,
           expensesPaise: expense?._sum.amount ?? 0,
@@ -1335,7 +1371,7 @@ export class AdminQueryService {
       let text = String(value ?? '');
       // Prevent spreadsheet formula execution when an exported name or slug is
       // opened in Excel/Sheets.
-      if (/^[=+\-@]/.test(text)) text = `'${text}`;
+      if (/^[\t\r\n]|^\s*[=+\-@]/.test(text)) text = `'${text}`;
       return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
     };
     const header = [

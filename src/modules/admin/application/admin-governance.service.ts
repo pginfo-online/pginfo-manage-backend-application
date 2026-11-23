@@ -3,7 +3,8 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { detectAdminWriteConflict } from './admin-write-conflict.js';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
@@ -52,7 +53,7 @@ export class AdminGovernanceService {
         where,
         skip: (query.page - 1) * query.limit,
         take: query.limit,
-        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+        orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
         include: {
           createdBy: {
             select: { id: true, email: true, firstName: true, lastName: true },
@@ -148,48 +149,50 @@ export class AdminGovernanceService {
       throw new BadRequestException('A resolution is required to close a case');
     }
     const closedAt = ['RESOLVED', 'REJECTED'].includes(nextStatus)
-      ? new Date()
+      ? (adminCase.closedAt ?? new Date())
       : null;
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.adminCase.update({
-        where: { id },
-        data: {
-          status: dto.status,
-          priority: dto.priority,
-          assignedToUserId: dto.assignedToUserId,
-          resolution: dto.resolution,
-          evidence: dto.evidence as Prisma.InputJsonValue | undefined,
-          dueAt: dto.dueAt,
-          closedAt,
-        },
-      });
-      await this.audit.record(
-        actor.userId,
-        'platform_case.update',
-        'AdminCase',
-        id,
-        {
-          organizationId: adminCase.organizationId,
-          metadata: {
-            reason: dto.reason,
-            before: {
-              status: adminCase.status,
-              priority: adminCase.priority,
-              assignedToUserId: adminCase.assignedToUserId,
-            },
-            after: {
-              status: updated.status,
-              priority: updated.priority,
-              assignedToUserId: updated.assignedToUserId,
-            },
+    return detectAdminWriteConflict(
+      this.prisma.$transaction(async (tx) => {
+        const updated = await tx.adminCase.update({
+          where: { id, updatedAt: adminCase.updatedAt },
+          data: {
+            status: dto.status,
+            priority: dto.priority,
+            assignedToUserId: dto.assignedToUserId,
+            resolution: dto.resolution,
+            evidence: dto.evidence as Prisma.InputJsonValue | undefined,
+            dueAt: dto.dueAt,
+            closedAt,
           },
-          request,
-          client: tx,
-        },
-      );
-      return updated;
-    });
+        });
+        await this.audit.record(
+          actor.userId,
+          'platform_case.update',
+          'AdminCase',
+          id,
+          {
+            organizationId: adminCase.organizationId,
+            metadata: {
+              reason: dto.reason,
+              before: {
+                status: adminCase.status,
+                priority: adminCase.priority,
+                assignedToUserId: adminCase.assignedToUserId,
+              },
+              after: {
+                status: updated.status,
+                priority: updated.priority,
+                assignedToUserId: updated.assignedToUserId,
+              },
+            },
+            request,
+            client: tx,
+          },
+        );
+        return updated;
+      }),
+    );
   }
 
   async listSettings(query: AdminListQueryDto) {
@@ -225,7 +228,10 @@ export class AdminGovernanceService {
     if (!/^[a-z][a-z0-9_.-]{2,99}$/.test(key)) {
       throw new BadRequestException('Invalid platform setting key');
     }
-    if (dto.value === undefined || JSON.stringify(dto.value).length > 50_000) {
+    if (
+      dto.value === undefined ||
+      Buffer.byteLength(JSON.stringify(dto.value), 'utf8') > 50_000
+    ) {
       throw new BadRequestException(
         'Setting value is required and limited to 50KB',
       );
@@ -233,6 +239,11 @@ export class AdminGovernanceService {
     const existing = await this.prisma.platformSetting.findUnique({
       where: { key },
     });
+    if (!existing && dto.expectedVersion !== undefined) {
+      throw new ConflictException(
+        'Setting no longer exists. Refresh before saving.',
+      );
+    }
     if (existing && dto.expectedVersion === undefined) {
       throw new ConflictException(
         'expectedVersion is required when updating a setting',
@@ -244,46 +255,51 @@ export class AdminGovernanceService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const value = dto.value as Prisma.InputJsonValue;
-      const setting = existing
-        ? await tx.platformSetting.update({
-            where: { id: existing.id },
-            data: {
-              value,
-              description: dto.description,
-              isPublic: dto.isPublic,
-              version: { increment: 1 },
-              updatedByUserId: actor.userId,
-            },
-          })
-        : await tx.platformSetting.create({
-            data: {
+    return detectAdminWriteConflict(
+      this.prisma.$transaction(async (tx) => {
+        const value =
+          dto.value === null
+            ? Prisma.JsonNull
+            : (dto.value as Prisma.InputJsonValue);
+        const setting = existing
+          ? await tx.platformSetting.update({
+              where: { id: existing.id, version: existing.version },
+              data: {
+                value,
+                description: dto.description,
+                isPublic: dto.isPublic,
+                version: { increment: 1 },
+                updatedByUserId: actor.userId,
+              },
+            })
+          : await tx.platformSetting.create({
+              data: {
+                key,
+                value,
+                description: dto.description,
+                isPublic: dto.isPublic,
+                updatedByUserId: actor.userId,
+              },
+            });
+        await this.audit.record(
+          actor.userId,
+          existing ? 'platform_setting.update' : 'platform_setting.create',
+          'PlatformSetting',
+          setting.id,
+          {
+            metadata: {
               key,
-              value,
-              description: dto.description,
-              isPublic: dto.isPublic,
-              updatedByUserId: actor.userId,
+              reason: dto.reason,
+              beforeVersion: existing?.version,
+              afterVersion: setting.version,
             },
-          });
-      await this.audit.record(
-        actor.userId,
-        existing ? 'platform_setting.update' : 'platform_setting.create',
-        'PlatformSetting',
-        setting.id,
-        {
-          metadata: {
-            key,
-            reason: dto.reason,
-            beforeVersion: existing?.version,
-            afterVersion: setting.version,
+            request,
+            client: tx,
           },
-          request,
-          client: tx,
-        },
-      );
-      return setting;
-    });
+        );
+        return setting;
+      }),
+    );
   }
 
   private async assertActiveAdmin(userId: string) {

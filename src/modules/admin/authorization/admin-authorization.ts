@@ -7,6 +7,7 @@ import {
   type CanActivate,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { PrismaService } from '../../../platform/database/index.js';
 import type { AuthenticatedUser } from '../../../common/types/index.js';
 import {
   resolvePermissions,
@@ -31,7 +32,10 @@ export const CurrentPlatformAdmin = createParamDecorator(
 
 @Injectable()
 export class PlatformAdminGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly prisma?: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<{
@@ -40,13 +44,18 @@ export class PlatformAdminGuard implements CanActivate {
     }>();
     if (!request.user) throw new ForbiddenException('Authentication required');
 
-    const admin = request.user.platformAdmin;
+    // The shared JWT strategy caches its user projection. Privileged access
+    // must reflect suspensions and role changes on the very next request.
+    const admin = await this.prisma?.platformAdmin.findUnique({
+      where: { userId: request.user.id, user: { isActive: true } },
+      select: { id: true, role: true, status: true, permissionOverrides: true },
+    });
     if (!admin || admin.status !== 'ACTIVE') {
       throw new ForbiddenException('Active platform administrator required');
     }
 
     const permissions = resolvePermissions(
-      admin.role as PlatformAdminContext['role'],
+      admin.role,
       admin.permissionOverrides,
     );
     const required =
@@ -63,7 +72,7 @@ export class PlatformAdminGuard implements CanActivate {
     request.platformAdmin = {
       id: admin.id,
       userId: request.user.id,
-      role: admin.role as PlatformAdminContext['role'],
+      role: admin.role,
       permissions,
       email: request.user.email,
     };

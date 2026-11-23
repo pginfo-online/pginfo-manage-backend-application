@@ -21,6 +21,39 @@ export declare const adminDashboardQuerySchema: z.ZodEffects<z.ZodObject<{
     from?: Date | undefined;
 }>;
 export type AdminDashboardQueryDto = z.infer<typeof adminDashboardQuerySchema>;
+export declare const adminPortfolioQuerySchema: z.ZodEffects<z.ZodObject<{
+    from: z.ZodOptional<z.ZodDate>;
+    to: z.ZodOptional<z.ZodDate>;
+    organizationId: z.ZodOptional<z.ZodString>;
+} & {
+    page: z.ZodOptional<z.ZodNumber>;
+    limit: z.ZodDefault<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    limit: number;
+    organizationId?: string | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}, {
+    organizationId?: string | undefined;
+    limit?: number | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}>, {
+    limit: number;
+    organizationId?: string | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}, {
+    organizationId?: string | undefined;
+    limit?: number | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}>;
+export type AdminPortfolioQueryDto = z.infer<typeof adminPortfolioQuerySchema>;
 export declare const adminListQuerySchema: z.ZodObject<{
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -238,7 +271,7 @@ export declare const adminAnnouncementsQuerySchema: z.ZodObject<{
     propertyId?: string | undefined;
 }>;
 export type AdminAnnouncementsQueryDto = z.infer<typeof adminAnnouncementsQuerySchema>;
-export declare const adminPaymentsQuerySchema: z.ZodObject<{
+export declare const adminPaymentsQuerySchema: z.ZodEffects<z.ZodObject<{
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
     search: z.ZodOptional<z.ZodString>;
@@ -249,6 +282,24 @@ export declare const adminPaymentsQuerySchema: z.ZodObject<{
     from: z.ZodOptional<z.ZodDate>;
     to: z.ZodOptional<z.ZodDate>;
 }, "strip", z.ZodTypeAny, {
+    limit: number;
+    page: number;
+    search?: string | undefined;
+    status?: "CONFIRMED" | "PENDING" | "FAILED" | "REFUNDED" | "DISPUTED" | undefined;
+    mode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    organizationId?: string | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}, {
+    search?: string | undefined;
+    status?: "CONFIRMED" | "PENDING" | "FAILED" | "REFUNDED" | "DISPUTED" | undefined;
+    mode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    organizationId?: string | undefined;
+    limit?: number | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}>, {
     limit: number;
     page: number;
     search?: string | undefined;
@@ -305,7 +356,7 @@ export declare const adminPendingQuerySchema: z.ZodObject<{
     organizationId?: string | undefined;
 }>;
 export type AdminPendingQueryDto = z.infer<typeof adminPendingQuerySchema>;
-export declare const adminAuditQuerySchema: z.ZodObject<{
+export declare const adminAuditQuerySchema: z.ZodEffects<z.ZodObject<{
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
     search: z.ZodOptional<z.ZodString>;
@@ -318,6 +369,28 @@ export declare const adminAuditQuerySchema: z.ZodObject<{
     from: z.ZodOptional<z.ZodDate>;
     to: z.ZodOptional<z.ZodDate>;
 }, "strip", z.ZodTypeAny, {
+    limit: number;
+    page: number;
+    search?: string | undefined;
+    userId?: string | undefined;
+    organizationId?: string | undefined;
+    action?: string | undefined;
+    entityType?: string | undefined;
+    entityId?: string | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}, {
+    search?: string | undefined;
+    userId?: string | undefined;
+    organizationId?: string | undefined;
+    limit?: number | undefined;
+    action?: string | undefined;
+    entityType?: string | undefined;
+    entityId?: string | undefined;
+    page?: number | undefined;
+    to?: Date | undefined;
+    from?: Date | undefined;
+}>, {
     limit: number;
     page: number;
     search?: string | undefined;

@@ -13,6 +13,8 @@ import { AdminAuditService } from '../application/admin-audit.service.js';
 import type { PlatformAdminContext } from '../domain/admin-permissions.js';
 import {
   adminDashboardQuerySchema,
+  adminPortfolioQuerySchema,
+  type AdminPortfolioQueryDto,
   type AdminDashboardQueryDto,
 } from './dto/admin.dto.js';
 import { adminRequestMetadata } from './admin-request.js';
@@ -42,8 +44,8 @@ export class AdminDashboardController {
   @RequirePlatformPermissions('reports.read')
   @ApiOperation({ summary: 'Get organization-level portfolio report' })
   portfolioReport(
-    @Query(new ZodValidationPipe(adminDashboardQuerySchema))
-    query: AdminDashboardQueryDto,
+    @Query(new ZodValidationPipe(adminPortfolioQuerySchema))
+    query: AdminPortfolioQueryDto,
   ) {
     return this.queryService.platformReport(query);
   }
@@ -60,11 +62,6 @@ export class AdminDashboardController {
     @CurrentPlatformAdmin() actor: PlatformAdminContext,
     @Req() request: Request,
   ) {
-    response.type('text/csv; charset=utf-8');
-    response.setHeader(
-      'Content-Disposition',
-      'attachment; filename="pginfo-platform-portfolio.csv"',
-    );
     const csv = await this.queryService.platformReportCsv(query);
     await this.audit.record(
       actor.userId,
@@ -80,6 +77,11 @@ export class AdminDashboardController {
         },
         request: adminRequestMetadata(request),
       },
+    );
+    response.type('text/csv; charset=utf-8');
+    response.setHeader(
+      'Content-Disposition',
+      'attachment; filename="pginfo-platform-portfolio.csv"',
     );
     return csv;
   }

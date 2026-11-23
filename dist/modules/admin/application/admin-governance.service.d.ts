@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../platform/database/index.js';
 import type { PlatformAdminContext } from '../domain/admin-permissions.js';
 import type { AdminCasesQueryDto, AdminListQueryDto, CreateAdminCaseDto, UpdateAdminCaseDto, UpsertPlatformSettingDto } from '../api/dto/admin.dto.js';

@@ -9,6 +9,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 import { createParamDecorator, ForbiddenException, Injectable, SetMetadata, } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { PrismaService } from '../../../platform/database/index.js';
 import { resolvePermissions, } from '../domain/admin-permissions.js';
 const PLATFORM_PERMISSIONS_KEY = 'platformPermissions';
 export const RequirePlatformPermissions = (...permissions) => SetMetadata(PLATFORM_PERMISSIONS_KEY, permissions);
@@ -18,14 +19,19 @@ export const CurrentPlatformAdmin = createParamDecorator((_data, context) => {
 });
 let PlatformAdminGuard = class PlatformAdminGuard {
     reflector;
-    constructor(reflector) {
+    prisma;
+    constructor(reflector, prisma) {
         this.reflector = reflector;
+        this.prisma = prisma;
     }
     async canActivate(context) {
         const request = context.switchToHttp().getRequest();
         if (!request.user)
             throw new ForbiddenException('Authentication required');
-        const admin = request.user.platformAdmin;
+        const admin = await this.prisma?.platformAdmin.findUnique({
+            where: { userId: request.user.id, user: { isActive: true } },
+            select: { id: true, role: true, status: true, permissionOverrides: true },
+        });
         if (!admin || admin.status !== 'ACTIVE') {
             throw new ForbiddenException('Active platform administrator required');
         }
@@ -46,7 +52,8 @@ let PlatformAdminGuard = class PlatformAdminGuard {
 };
 PlatformAdminGuard = __decorate([
     Injectable(),
-    __metadata("design:paramtypes", [Reflector])
+    __metadata("design:paramtypes", [Reflector,
+        PrismaService])
 ], PlatformAdminGuard);
 export { PlatformAdminGuard };
 //# sourceMappingURL=admin-authorization.js.map

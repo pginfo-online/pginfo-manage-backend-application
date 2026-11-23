@@ -8,6 +8,8 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 import { BadRequestException, ConflictException, Injectable, } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { detectAdminWriteConflict } from './admin-write-conflict.js';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
@@ -44,7 +46,7 @@ let AdminGovernanceService = class AdminGovernanceService {
                 where,
                 skip: (query.page - 1) * query.limit,
                 take: query.limit,
-                orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+                orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
                 include: {
                     createdBy: {
                         select: { id: true, email: true, firstName: true, lastName: true },
@@ -120,11 +122,11 @@ let AdminGovernanceService = class AdminGovernanceService {
             throw new BadRequestException('A resolution is required to close a case');
         }
         const closedAt = ['RESOLVED', 'REJECTED'].includes(nextStatus)
-            ? new Date()
+            ? (adminCase.closedAt ?? new Date())
             : null;
-        return this.prisma.$transaction(async (tx) => {
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.adminCase.update({
-                where: { id },
+                where: { id, updatedAt: adminCase.updatedAt },
                 data: {
                     status: dto.status,
                     priority: dto.priority,
@@ -154,7 +156,7 @@ let AdminGovernanceService = class AdminGovernanceService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
     async listSettings(query) {
         const where = query.search
@@ -183,23 +185,29 @@ let AdminGovernanceService = class AdminGovernanceService {
         if (!/^[a-z][a-z0-9_.-]{2,99}$/.test(key)) {
             throw new BadRequestException('Invalid platform setting key');
         }
-        if (dto.value === undefined || JSON.stringify(dto.value).length > 50_000) {
+        if (dto.value === undefined ||
+            Buffer.byteLength(JSON.stringify(dto.value), 'utf8') > 50_000) {
             throw new BadRequestException('Setting value is required and limited to 50KB');
         }
         const existing = await this.prisma.platformSetting.findUnique({
             where: { key },
         });
+        if (!existing && dto.expectedVersion !== undefined) {
+            throw new ConflictException('Setting no longer exists. Refresh before saving.');
+        }
         if (existing && dto.expectedVersion === undefined) {
             throw new ConflictException('expectedVersion is required when updating a setting');
         }
         if (existing && existing.version !== dto.expectedVersion) {
             throw new ConflictException(`Setting version changed; expected ${dto.expectedVersion}, current ${existing.version}`);
         }
-        return this.prisma.$transaction(async (tx) => {
-            const value = dto.value;
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
+            const value = dto.value === null
+                ? Prisma.JsonNull
+                : dto.value;
             const setting = existing
                 ? await tx.platformSetting.update({
-                    where: { id: existing.id },
+                    where: { id: existing.id, version: existing.version },
                     data: {
                         value,
                         description: dto.description,
@@ -228,7 +236,7 @@ let AdminGovernanceService = class AdminGovernanceService {
                 client: tx,
             });
             return setting;
-        });
+        }));
     }
     async assertActiveAdmin(userId) {
         const admin = await this.prisma.platformAdmin.findUnique({

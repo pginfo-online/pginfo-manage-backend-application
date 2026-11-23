@@ -8,6 +8,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 import { BadRequestException, ConflictException, Injectable, } from '@nestjs/common';
+import { detectAdminWriteConflict } from './admin-write-conflict.js';
 import { PrismaService } from '../../../platform/database/index.js';
 import { NotFoundError } from '../../../common/errors/index.js';
 import { AdminAuditService, } from './admin-audit.service.js';
@@ -24,9 +25,9 @@ let AdminCommandService = class AdminCommandService {
         });
         if (!organization)
             throw new NotFoundError('Organization', id);
-        return this.prisma.$transaction(async (tx) => {
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.organization.update({
-                where: { id },
+                where: { id, updatedAt: organization.updatedAt },
                 data: { isActive: dto.isActive },
             });
             await this.audit.record(actor.userId, 'platform_organization.status_update', 'Organization', id, {
@@ -40,7 +41,7 @@ let AdminCommandService = class AdminCommandService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
     async updatePropertyStatus(id, dto, actor, request) {
         const property = await this.prisma.property.findUnique({ where: { id } });
@@ -57,9 +58,23 @@ let AdminCommandService = class AdminCommandService {
                 throw new ConflictException('Move out or transfer active residents before archiving the property');
             }
         }
-        return this.prisma.$transaction(async (tx) => {
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.property.update({
-                where: { id },
+                where: {
+                    id,
+                    updatedAt: property.updatedAt,
+                    ...(dto.status === 'ARCHIVED'
+                        ? {
+                            residents: {
+                                none: {
+                                    status: {
+                                        in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                                    },
+                                },
+                            },
+                        }
+                        : {}),
+                },
                 data: { status: dto.status },
             });
             await this.audit.record(actor.userId, 'platform_property.status_update', 'Property', id, {
@@ -73,7 +88,7 @@ let AdminCommandService = class AdminCommandService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
     async updateRoomStatus(id, dto, actor, request) {
         if (['OCCUPIED', 'PARTIALLY_OCCUPIED'].includes(dto.status)) {
@@ -91,9 +106,30 @@ let AdminCommandService = class AdminCommandService {
         if (activeOccupants > 0 && dto.status !== room.status) {
             throw new ConflictException('Transfer active residents before changing this room status');
         }
-        return this.prisma.$transaction(async (tx) => {
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.room.update({
-                where: { id },
+                where: {
+                    id,
+                    updatedAt: room.updatedAt,
+                    ...(dto.status !== room.status
+                        ? {
+                            residents: {
+                                none: {
+                                    status: {
+                                        in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                                    },
+                                },
+                            },
+                            beds: {
+                                none: {
+                                    bookings: {
+                                        some: { status: { in: ['CONFIRMED', 'CHECKED_IN'] } },
+                                    },
+                                },
+                            },
+                        }
+                        : {}),
+                },
                 data: { status: dto.status },
             });
             await this.audit.record(actor.userId, 'platform_room.status_update', 'Room', id, {
@@ -107,7 +143,7 @@ let AdminCommandService = class AdminCommandService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
     async updateBedStatus(id, dto, actor, request) {
         if (['OCCUPIED', 'RESERVED'].includes(dto.status)) {
@@ -131,9 +167,26 @@ let AdminCommandService = class AdminCommandService {
             dto.status !== bed.status) {
             throw new ConflictException('Resolve active residents and bookings before changing this bed status');
         }
-        return this.prisma.$transaction(async (tx) => {
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.bed.update({
-                where: { id },
+                where: {
+                    id,
+                    updatedAt: bed.updatedAt,
+                    ...(dto.status !== bed.status
+                        ? {
+                            residents: {
+                                none: {
+                                    status: {
+                                        in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'],
+                                    },
+                                },
+                            },
+                            bookings: {
+                                none: { status: { in: ['CONFIRMED', 'CHECKED_IN'] } },
+                            },
+                        }
+                        : {}),
+                },
                 data: { status: dto.status },
             });
             await this.audit.record(actor.userId, 'platform_bed.status_update', 'Bed', id, {
@@ -147,7 +200,7 @@ let AdminCommandService = class AdminCommandService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
     async reviewPayout(id, dto, actor, request) {
         const account = await this.prisma.landlordPayoutAccount.findUnique({
@@ -170,9 +223,12 @@ let AdminCommandService = class AdminCommandService {
                 : dto.kycStatus === 'REJECTED'
                     ? 'REJECTED'
                     : account.status);
-        return this.prisma.$transaction(async (tx) => {
+        if (status === 'ACTIVE' && dto.kycStatus !== 'VERIFIED') {
+            throw new BadRequestException('Only verified payout accounts can be active');
+        }
+        return detectAdminWriteConflict(this.prisma.$transaction(async (tx) => {
             const updated = await tx.landlordPayoutAccount.update({
-                where: { id },
+                where: { id, updatedAt: account.updatedAt },
                 data: { kycStatus: dto.kycStatus, status },
                 select: {
                     id: true,
@@ -195,7 +251,7 @@ let AdminCommandService = class AdminCommandService {
                 client: tx,
             });
             return updated;
-        });
+        }));
     }
 };
 AdminCommandService = __decorate([

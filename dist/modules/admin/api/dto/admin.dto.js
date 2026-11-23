@@ -1,7 +1,7 @@
 import { AdminCasePriority, AdminCaseStatus, AdminCaseType, BedStatus, KycStatus, PlatformAdminStatus, PlatformRole, PropertyStatus, RoomStatus, } from '@prisma/client';
 import { z } from 'zod';
 import { PLATFORM_PERMISSIONS } from '../../domain/admin-permissions.js';
-const page = z.coerce.number().int().min(1).default(1);
+const page = z.coerce.number().int().min(1).max(100_000).default(1);
 const limit = z.coerce.number().int().min(1).max(100).default(20);
 const search = z.string().trim().max(200).optional();
 const uuid = z.string().uuid();
@@ -13,13 +13,12 @@ const optionalBoolean = z.preprocess((value) => {
         return false;
     return value;
 }, z.boolean().optional());
-export const adminDashboardQuerySchema = z
-    .object({
+const adminPeriodSchema = z.object({
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
     organizationId: uuid.optional(),
-})
-    .superRefine((value, context) => {
+});
+const validatePeriod = (value, context) => {
     if (value.from && value.to && value.from > value.to) {
         context.addIssue({
             code: 'custom',
@@ -27,7 +26,14 @@ export const adminDashboardQuerySchema = z
             path: ['from'],
         });
     }
-});
+};
+export const adminDashboardQuerySchema = adminPeriodSchema.superRefine(validatePeriod);
+export const adminPortfolioQuerySchema = adminPeriodSchema
+    .extend({
+    page: z.coerce.number().int().min(1).max(100_000).optional(),
+    limit,
+})
+    .superRefine(validatePeriod);
 export const adminListQuerySchema = z.object({ page, limit, search });
 export const adminUsersQuerySchema = adminListQuerySchema.extend({
     isActive: optionalBoolean,
@@ -88,7 +94,8 @@ export const adminAnnouncementsQuerySchema = adminListQuerySchema.extend({
         .enum(['DRAFT', 'SCHEDULED', 'SENDING', 'SENT', 'FAILED'])
         .optional(),
 });
-export const adminPaymentsQuerySchema = adminListQuerySchema.extend({
+export const adminPaymentsQuerySchema = adminListQuerySchema
+    .extend({
     organizationId: uuid.optional(),
     status: z
         .enum(['PENDING', 'CONFIRMED', 'FAILED', 'REFUNDED', 'DISPUTED'])
@@ -98,7 +105,8 @@ export const adminPaymentsQuerySchema = adminListQuerySchema.extend({
         .optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
-});
+})
+    .superRefine(validatePeriod);
 export const adminPayoutsQuerySchema = adminListQuerySchema.extend({
     organizationId: uuid.optional(),
     status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED']).optional(),
@@ -107,7 +115,8 @@ export const adminPayoutsQuerySchema = adminListQuerySchema.extend({
 export const adminPendingQuerySchema = z.object({
     organizationId: uuid.optional(),
 });
-export const adminAuditQuerySchema = adminListQuerySchema.extend({
+export const adminAuditQuerySchema = adminListQuerySchema
+    .extend({
     organizationId: uuid.optional(),
     userId: uuid.optional(),
     action: z.string().trim().max(200).optional(),
@@ -115,7 +124,8 @@ export const adminAuditQuerySchema = adminListQuerySchema.extend({
     entityId: z.string().trim().max(100).optional(),
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
-});
+})
+    .superRefine(validatePeriod);
 export const adminCasesQuerySchema = adminListQuerySchema.extend({
     type: z.nativeEnum(AdminCaseType).optional(),
     status: z.nativeEnum(AdminCaseStatus).optional(),

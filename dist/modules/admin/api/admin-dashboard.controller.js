@@ -17,7 +17,7 @@ import { ZodValidationPipe } from '../../../common/validation/index.js';
 import { CurrentPlatformAdmin, PlatformAdminGuard, RequirePlatformPermissions, } from '../authorization/admin-authorization.js';
 import { AdminQueryService } from '../application/admin-query.service.js';
 import { AdminAuditService } from '../application/admin-audit.service.js';
-import { adminDashboardQuerySchema, } from './dto/admin.dto.js';
+import { adminDashboardQuerySchema, adminPortfolioQuerySchema, } from './dto/admin.dto.js';
 import { adminRequestMetadata } from './admin-request.js';
 let AdminDashboardController = class AdminDashboardController {
     queryService;
@@ -33,8 +33,6 @@ let AdminDashboardController = class AdminDashboardController {
         return this.queryService.platformReport(query);
     }
     async portfolioReportCsv(query, response, actor, request) {
-        response.type('text/csv; charset=utf-8');
-        response.setHeader('Content-Disposition', 'attachment; filename="pginfo-platform-portfolio.csv"');
         const csv = await this.queryService.platformReportCsv(query);
         await this.audit.record(actor.userId, 'platform_report.export', 'PlatformReport', 'portfolio', {
             organizationId: query.organizationId,
@@ -45,6 +43,8 @@ let AdminDashboardController = class AdminDashboardController {
             },
             request: adminRequestMetadata(request),
         });
+        response.type('text/csv; charset=utf-8');
+        response.setHeader('Content-Disposition', 'attachment; filename="pginfo-platform-portfolio.csv"');
         return csv;
     }
 };
@@ -61,7 +61,7 @@ __decorate([
     Get('reports/portfolio'),
     RequirePlatformPermissions('reports.read'),
     ApiOperation({ summary: 'Get organization-level portfolio report' }),
-    __param(0, Query(new ZodValidationPipe(adminDashboardQuerySchema))),
+    __param(0, Query(new ZodValidationPipe(adminPortfolioQuerySchema))),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)

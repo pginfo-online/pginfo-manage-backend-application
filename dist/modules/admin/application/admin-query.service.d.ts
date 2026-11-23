@@ -821,11 +821,10 @@ export declare class AdminQueryService {
         entityType: string | null;
         entityId: string | null;
     }>>;
-    platformReport(query: AdminDashboardQueryDto): Promise<{
-        period: {
-            from: Date;
-            to: Date;
-        };
+    platformReport(query: AdminDashboardQueryDto & {
+        page?: number;
+        limit?: number;
+    }): Promise<{
         organizations: {
             properties: number;
             residents: number;
@@ -833,11 +832,23 @@ export declare class AdminQueryService {
             collectedPaise: number;
             expensesPaise: number;
             outstandingPaise: number;
-            id?: string | undefined;
-            name?: string | undefined;
-            isActive?: boolean | undefined;
-            slug?: string | undefined;
+            id: string;
+            name: string;
+            isActive: boolean;
+            slug: string;
         }[];
+        meta?: {
+            total: number;
+            limit: number;
+            hasMore: boolean;
+            nextCursor?: string;
+            page?: number;
+            totalPages?: number;
+        } | undefined;
+        period: {
+            from: Date;
+            to: Date;
+        };
     }>;
     platformReportCsv(query: AdminDashboardQueryDto): Promise<string>;
 }
