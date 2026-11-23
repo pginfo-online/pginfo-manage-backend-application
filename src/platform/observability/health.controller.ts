@@ -18,6 +18,19 @@ export class HealthController {
   ) {}
 
   /**
+   * Root health probe — basic process liveness & uptime.
+   */
+  @Get()
+  @ApiOperation({ summary: 'Basic health check' })
+  root(): { status: string; uptime: number; timestamp: string } {
+    return {
+      status: 'ok',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
    * Liveness probe — is the process running?
    * Used by container orchestrators (Docker, K8s) to restart crashed instances.
    */

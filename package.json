@@ -36,7 +36,13 @@
     "admin:provision": "tsx scripts/provision-platform-admin.ts",
     "db:reset": "prisma migrate reset --force",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop ecosystem.config.cjs",
+    "pm2:restart": "pm2 restart ecosystem.config.cjs",
+    "pm2:reload": "pm2 reload ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs",
+    "pm2:delete": "pm2 delete ecosystem.config.cjs"
   },
   "dependencies": {
     "@nestjs/bullmq": "^12.0.0",

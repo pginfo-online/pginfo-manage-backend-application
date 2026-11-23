@@ -18,13 +18,21 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // ── CORS ─────────────────────────────────────────────────
-  const corsOrigins = (
-    process.env['CORS_ORIGINS'] ??
-    'http://localhost:3000,http://localhost:3001,http://localhost:5000,http://localhost:5173'
-  )
+  const defaultCorsOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5000',
+    'http://localhost:5173',
+    'https://app.pginfo.business',
+    'https://api.pginfo.business',
+  ];
+  const parsedOrigins = (process.env['CORS_ORIGINS'] ?? '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().replace(/\/$/, ''))
     .filter(Boolean);
+  const corsOrigins =
+    parsedOrigins.length > 0 ? parsedOrigins : defaultCorsOrigins;
+
   app.enableCors({
     origin: corsOrigins,
     credentials: true,
@@ -41,7 +49,7 @@ async function bootstrap(): Promise<void> {
   // ── Global Prefix ────────────────────────────────────────
   const apiPrefix = process.env['API_PREFIX'] ?? 'api/v1';
   app.setGlobalPrefix(apiPrefix, {
-    exclude: ['health/live', 'health/ready'], // Health checks at root
+    exclude: ['health', 'health/live', 'health/ready'], // Health checks at root
   });
 
   // ── Global Exception Filter ──────────────────────────────

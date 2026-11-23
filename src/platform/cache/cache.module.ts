@@ -1,4 +1,10 @@
-import { Global, Module, Logger } from '@nestjs/common';
+import {
+  Global,
+  Module,
+  Logger,
+  type OnApplicationShutdown,
+  Inject,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import type { EnvConfig } from '../../config/index.js';
@@ -42,4 +48,22 @@ export const REDIS_CLIENT = 'REDIS_CLIENT';
   ],
   exports: [REDIS_CLIENT],
 })
-export class CacheModule {}
+export class CacheModule implements OnApplicationShutdown {
+  private readonly logger = new Logger(CacheModule.name);
+
+  constructor(@Inject(REDIS_CLIENT) private readonly client: Redis) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    try {
+      if (
+        this.client &&
+        (this.client.status === 'ready' || this.client.status === 'connecting')
+      ) {
+        this.logger.log('Disconnecting Redis client gracefully...');
+        await this.client.quit();
+      }
+    } catch {
+      this.client?.disconnect();
+    }
+  }
+}

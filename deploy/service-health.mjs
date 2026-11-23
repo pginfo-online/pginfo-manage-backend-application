@@ -24,7 +24,8 @@ try {
       if ((await queue.getWorkers()).length === 0) throw new Error(`${name}: no worker`);
     }
   } else {
-    const res = await fetch('http://127.0.0.1:3000/health/ready', {
+    const port = process.env.PORT || 3000;
+    const res = await fetch(`http://127.0.0.1:${port}/health/ready`, {
       signal: AbortSignal.timeout(6000),
     });
     if (!res.ok || (await res.json()).status !== 'ok') throw new Error('API/database unavailable');

@@ -21,6 +21,12 @@ describe('HealthController (e2e)', () => {
     await app.init();
   });
 
+  it('/health (GET)', async () => {
+    const res = await request(app.getHttpServer()).get('/health').expect(200);
+    expect(res.body.status).toBe('ok');
+    expect(typeof res.body.uptime).toBe('number');
+  });
+
   it('/health/live (GET)', () => {
     return request(app.getHttpServer())
       .get('/health/live')
