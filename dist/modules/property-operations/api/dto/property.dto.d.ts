@@ -1,0 +1,165 @@
+import { z } from 'zod';
+export declare const createPropertySchema: z.ZodObject<{
+    name: z.ZodString;
+    type: z.ZodNativeEnum<{
+        PG: "PG";
+        HOSTEL: "HOSTEL";
+        CO_LIVING: "CO_LIVING";
+        FLAT: "FLAT";
+        APARTMENT: "APARTMENT";
+        RK: "RK";
+        OTHER: "OTHER";
+    }>;
+    addressLine1: z.ZodString;
+    addressLine2: z.ZodOptional<z.ZodString>;
+    city: z.ZodString;
+    state: z.ZodString;
+    pincode: z.ZodString;
+    country: z.ZodDefault<z.ZodString>;
+    ownerName: z.ZodOptional<z.ZodString>;
+    contactPhone: z.ZodOptional<z.ZodString>;
+    contactEmail: z.ZodOptional<z.ZodString>;
+    timezone: z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>;
+    rentDueDay: z.ZodDefault<z.ZodNumber>;
+    description: z.ZodOptional<z.ZodString>;
+    amenities: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+    totalFloors: z.ZodOptional<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    type: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER";
+    name: string;
+    addressLine1: string;
+    city: string;
+    state: string;
+    pincode: string;
+    country: string;
+    timezone: string;
+    rentDueDay: number;
+    amenities: string[];
+    description?: string | undefined;
+    addressLine2?: string | undefined;
+    ownerName?: string | undefined;
+    contactPhone?: string | undefined;
+    contactEmail?: string | undefined;
+    totalFloors?: number | undefined;
+}, {
+    type: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER";
+    name: string;
+    addressLine1: string;
+    city: string;
+    state: string;
+    pincode: string;
+    description?: string | undefined;
+    addressLine2?: string | undefined;
+    country?: string | undefined;
+    ownerName?: string | undefined;
+    contactPhone?: string | undefined;
+    contactEmail?: string | undefined;
+    timezone?: string | undefined;
+    rentDueDay?: number | undefined;
+    amenities?: string[] | undefined;
+    totalFloors?: number | undefined;
+}>;
+export type CreatePropertyDto = z.infer<typeof createPropertySchema>;
+export declare const updatePropertySchema: z.ZodObject<{
+    name: z.ZodOptional<z.ZodString>;
+    type: z.ZodOptional<z.ZodNativeEnum<{
+        PG: "PG";
+        HOSTEL: "HOSTEL";
+        CO_LIVING: "CO_LIVING";
+        FLAT: "FLAT";
+        APARTMENT: "APARTMENT";
+        RK: "RK";
+        OTHER: "OTHER";
+    }>>;
+    addressLine1: z.ZodOptional<z.ZodString>;
+    addressLine2: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    city: z.ZodOptional<z.ZodString>;
+    state: z.ZodOptional<z.ZodString>;
+    pincode: z.ZodOptional<z.ZodString>;
+    country: z.ZodOptional<z.ZodDefault<z.ZodString>>;
+    ownerName: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    contactPhone: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    contactEmail: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    timezone: z.ZodOptional<z.ZodDefault<z.ZodEffects<z.ZodString, string, string>>>;
+    rentDueDay: z.ZodOptional<z.ZodDefault<z.ZodNumber>>;
+    description: z.ZodOptional<z.ZodOptional<z.ZodString>>;
+    amenities: z.ZodOptional<z.ZodDefault<z.ZodArray<z.ZodString, "many">>>;
+    totalFloors: z.ZodOptional<z.ZodOptional<z.ZodNumber>>;
+} & {
+    status: z.ZodOptional<z.ZodNativeEnum<{
+        ACTIVE: "ACTIVE";
+        INACTIVE: "INACTIVE";
+        ARCHIVED: "ARCHIVED";
+        UNDER_MAINTENANCE: "UNDER_MAINTENANCE";
+    }>>;
+}, "strip", z.ZodTypeAny, {
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
+    type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    name?: string | undefined;
+    description?: string | undefined;
+    addressLine1?: string | undefined;
+    addressLine2?: string | undefined;
+    city?: string | undefined;
+    state?: string | undefined;
+    pincode?: string | undefined;
+    country?: string | undefined;
+    ownerName?: string | undefined;
+    contactPhone?: string | undefined;
+    contactEmail?: string | undefined;
+    timezone?: string | undefined;
+    rentDueDay?: number | undefined;
+    amenities?: string[] | undefined;
+    totalFloors?: number | undefined;
+}, {
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
+    type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    name?: string | undefined;
+    description?: string | undefined;
+    addressLine1?: string | undefined;
+    addressLine2?: string | undefined;
+    city?: string | undefined;
+    state?: string | undefined;
+    pincode?: string | undefined;
+    country?: string | undefined;
+    ownerName?: string | undefined;
+    contactPhone?: string | undefined;
+    contactEmail?: string | undefined;
+    timezone?: string | undefined;
+    rentDueDay?: number | undefined;
+    amenities?: string[] | undefined;
+    totalFloors?: number | undefined;
+}>;
+export type UpdatePropertyDto = z.infer<typeof updatePropertySchema>;
+export declare const queryPropertiesSchema: z.ZodObject<{
+    search: z.ZodOptional<z.ZodString>;
+    status: z.ZodOptional<z.ZodNativeEnum<{
+        ACTIVE: "ACTIVE";
+        INACTIVE: "INACTIVE";
+        ARCHIVED: "ARCHIVED";
+        UNDER_MAINTENANCE: "UNDER_MAINTENANCE";
+    }>>;
+    type: z.ZodOptional<z.ZodNativeEnum<{
+        PG: "PG";
+        HOSTEL: "HOSTEL";
+        CO_LIVING: "CO_LIVING";
+        FLAT: "FLAT";
+        APARTMENT: "APARTMENT";
+        RK: "RK";
+        OTHER: "OTHER";
+    }>>;
+    page: z.ZodDefault<z.ZodNumber>;
+    limit: z.ZodDefault<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    limit: number;
+    page: number;
+    search?: string | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
+    type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+}, {
+    search?: string | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
+    type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    limit?: number | undefined;
+    page?: number | undefined;
+}>;
+export type QueryPropertiesDto = z.infer<typeof queryPropertiesSchema>;

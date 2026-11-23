@@ -1,0 +1,40 @@
+import { z } from 'zod';
+import { calendarDateSchema } from '../../../../common/validation/date.js';
+import { PaymentMode } from '@prisma/client';
+export const createExpenseSchema = z.object({
+    propertyId: z.string().uuid(),
+    categoryId: z.string().uuid(),
+    amount: z.coerce
+        .number()
+        .int()
+        .positive('Expense amount must be positive paise')
+        .max(2147483647),
+    expenseDate: calendarDateSchema
+        .default(() => new Date().toISOString().slice(0, 10))
+        .transform((d) => new Date(d)),
+    paymentMode: z.nativeEnum(PaymentMode),
+    paidBy: z.string().trim().optional(),
+    paidTo: z.string().trim().optional(),
+    description: z.string().min(1, 'Description is required').trim(),
+    receiptUrl: z.string().url().optional(),
+    notes: z.string().optional(),
+});
+export const updateExpenseSchema = createExpenseSchema.partial();
+export const createExpenseCategorySchema = z.object({
+    name: z.string().min(2, 'Category name is required').trim(),
+});
+export const queryExpensesSchema = z.object({
+    propertyId: z.string().uuid().optional(),
+    categoryId: z.string().uuid().optional(),
+    paymentMode: z.nativeEnum(PaymentMode).optional(),
+    search: z.string().trim().max(100).optional(),
+    startDate: calendarDateSchema
+        .optional()
+        .transform((d) => (d ? new Date(d) : undefined)),
+    endDate: calendarDateSchema
+        .optional()
+        .transform((d) => (d ? new Date(d) : undefined)),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+//# sourceMappingURL=expense.dto.js.map

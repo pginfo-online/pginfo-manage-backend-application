@@ -1,0 +1,403 @@
+import { z } from 'zod';
+export declare const createResidentSchema: z.ZodObject<{
+    onboardingKey: z.ZodOptional<z.ZodString>;
+    propertyId: z.ZodString;
+    roomId: z.ZodOptional<z.ZodString>;
+    bedId: z.ZodOptional<z.ZodString>;
+    firstName: z.ZodString;
+    lastName: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodString>;
+    mobile: z.ZodString;
+    whatsappNumber: z.ZodOptional<z.ZodString>;
+    alternatePhone: z.ZodOptional<z.ZodString>;
+    sendWhatsappReminder: z.ZodOptional<z.ZodBoolean>;
+    emergencyContact: z.ZodOptional<z.ZodString>;
+    permanentAddress: z.ZodOptional<z.ZodString>;
+    parentName: z.ZodOptional<z.ZodString>;
+    parentPhone: z.ZodOptional<z.ZodString>;
+    idProofUrl: z.ZodOptional<z.ZodString>;
+    agreementUrl: z.ZodOptional<z.ZodString>;
+    profession: z.ZodDefault<z.ZodNativeEnum<{
+        STUDENT: "STUDENT";
+        WORKING_PROFESSIONAL: "WORKING_PROFESSIONAL";
+        SELF_EMPLOYED: "SELF_EMPLOYED";
+        OTHER: "OTHER";
+    }>>;
+    stayType: z.ZodOptional<z.ZodEnum<["LONG_TERM", "SHORT_TERM"]>>;
+    tenantType: z.ZodOptional<z.ZodEnum<["STUDENT", "PROFESSIONAL", "BACHELOR", "FAMILY", "COUPLE", "STAFF", "OTHER"]>>;
+    noticePeriodDays: z.ZodOptional<z.ZodNumber>;
+    agreementPeriodMonths: z.ZodOptional<z.ZodNumber>;
+    openingBalances: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodEffects<z.ZodObject<{
+        type: z.ZodDefault<z.ZodNativeEnum<{
+            RENT: "RENT";
+            SECURITY_DEPOSIT: "SECURITY_DEPOSIT";
+            ELECTRICITY: "ELECTRICITY";
+            WATER: "WATER";
+            MAINTENANCE: "MAINTENANCE";
+            LATE_FEE: "LATE_FEE";
+            OTHER: "OTHER";
+        }>>;
+        amount: z.ZodNumber;
+        dueDate: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>;
+        dueEndDate: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>>;
+        attachmentUrls: z.ZodDefault<z.ZodArray<z.ZodString, "many">>;
+        description: z.ZodOptional<z.ZodString>;
+        collectedAmount: z.ZodDefault<z.ZodNumber>;
+        collectionDate: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>>;
+        collectionMode: z.ZodDefault<z.ZodNativeEnum<{
+            CASH: "CASH";
+            UPI: "UPI";
+            BANK_TRANSFER: "BANK_TRANSFER";
+            CHEQUE: "CHEQUE";
+            RAZORPAY: "RAZORPAY";
+            OTHER: "OTHER";
+        }>>;
+    }, "strip", z.ZodTypeAny, {
+        type: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE";
+        attachmentUrls: string[];
+        amount: number;
+        dueDate: Date;
+        collectedAmount: number;
+        collectionMode: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY";
+        description?: string | undefined;
+        dueEndDate?: Date | undefined;
+        collectionDate?: Date | undefined;
+    }, {
+        amount: number;
+        dueDate: string;
+        type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+        description?: string | undefined;
+        attachmentUrls?: string[] | undefined;
+        dueEndDate?: string | undefined;
+        collectedAmount?: number | undefined;
+        collectionDate?: string | undefined;
+        collectionMode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    }>, {
+        type: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE";
+        attachmentUrls: string[];
+        amount: number;
+        dueDate: Date;
+        collectedAmount: number;
+        collectionMode: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY";
+        description?: string | undefined;
+        dueEndDate?: Date | undefined;
+        collectionDate?: Date | undefined;
+    }, {
+        amount: number;
+        dueDate: string;
+        type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+        description?: string | undefined;
+        attachmentUrls?: string[] | undefined;
+        dueEndDate?: string | undefined;
+        collectedAmount?: number | undefined;
+        collectionDate?: string | undefined;
+        collectionMode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    }>, {
+        type: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE";
+        attachmentUrls: string[];
+        amount: number;
+        dueDate: Date;
+        collectedAmount: number;
+        collectionMode: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY";
+        description?: string | undefined;
+        dueEndDate?: Date | undefined;
+        collectionDate?: Date | undefined;
+    }, {
+        amount: number;
+        dueDate: string;
+        type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+        description?: string | undefined;
+        attachmentUrls?: string[] | undefined;
+        dueEndDate?: string | undefined;
+        collectedAmount?: number | undefined;
+        collectionDate?: string | undefined;
+        collectionMode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    }>, "many">>;
+    rentalFrequencyMonths: z.ZodOptional<z.ZodUnion<[z.ZodLiteral<1>, z.ZodLiteral<3>, z.ZodLiteral<6>, z.ZodLiteral<10>, z.ZodLiteral<11>, z.ZodLiteral<12>]>>;
+    initialRent: z.ZodOptional<z.ZodEnum<["CREATE", "SKIP"]>>;
+    monthlyRent: z.ZodNumber;
+    securityDeposit: z.ZodDefault<z.ZodNumber>;
+    joiningDate: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>;
+    moveInDate: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>>;
+    expectedVacatingDate: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>>;
+    lockInEndDate: z.ZodOptional<z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>>;
+    rentDueDay: z.ZodOptional<z.ZodNumber>;
+    notes: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    mobile: string;
+    firstName: string;
+    propertyId: string;
+    profession: "OTHER" | "STUDENT" | "WORKING_PROFESSIONAL" | "SELF_EMPLOYED";
+    monthlyRent: number;
+    securityDeposit: number;
+    joiningDate: Date;
+    email?: string | undefined;
+    lastName?: string | undefined;
+    rentDueDay?: number | undefined;
+    roomId?: string | undefined;
+    bedId?: string | undefined;
+    whatsappNumber?: string | undefined;
+    alternatePhone?: string | undefined;
+    sendWhatsappReminder?: boolean | undefined;
+    emergencyContact?: string | undefined;
+    permanentAddress?: string | undefined;
+    parentName?: string | undefined;
+    parentPhone?: string | undefined;
+    idProofUrl?: string | undefined;
+    agreementUrl?: string | undefined;
+    stayType?: "LONG_TERM" | "SHORT_TERM" | undefined;
+    tenantType?: "STAFF" | "OTHER" | "STUDENT" | "PROFESSIONAL" | "BACHELOR" | "FAMILY" | "COUPLE" | undefined;
+    noticePeriodDays?: number | undefined;
+    agreementPeriodMonths?: number | undefined;
+    rentalFrequencyMonths?: 1 | 3 | 6 | 10 | 12 | 11 | undefined;
+    moveInDate?: Date | undefined;
+    expectedVacatingDate?: Date | undefined;
+    lockInEndDate?: Date | undefined;
+    notes?: string | undefined;
+    onboardingKey?: string | undefined;
+    openingBalances?: {
+        type: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE";
+        attachmentUrls: string[];
+        amount: number;
+        dueDate: Date;
+        collectedAmount: number;
+        collectionMode: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY";
+        description?: string | undefined;
+        dueEndDate?: Date | undefined;
+        collectionDate?: Date | undefined;
+    }[] | undefined;
+    initialRent?: "CREATE" | "SKIP" | undefined;
+}, {
+    mobile: string;
+    firstName: string;
+    propertyId: string;
+    monthlyRent: number;
+    joiningDate: string;
+    email?: string | undefined;
+    lastName?: string | undefined;
+    rentDueDay?: number | undefined;
+    roomId?: string | undefined;
+    bedId?: string | undefined;
+    whatsappNumber?: string | undefined;
+    alternatePhone?: string | undefined;
+    sendWhatsappReminder?: boolean | undefined;
+    emergencyContact?: string | undefined;
+    permanentAddress?: string | undefined;
+    parentName?: string | undefined;
+    parentPhone?: string | undefined;
+    idProofUrl?: string | undefined;
+    agreementUrl?: string | undefined;
+    profession?: "OTHER" | "STUDENT" | "WORKING_PROFESSIONAL" | "SELF_EMPLOYED" | undefined;
+    stayType?: "LONG_TERM" | "SHORT_TERM" | undefined;
+    tenantType?: "STAFF" | "OTHER" | "STUDENT" | "PROFESSIONAL" | "BACHELOR" | "FAMILY" | "COUPLE" | undefined;
+    noticePeriodDays?: number | undefined;
+    agreementPeriodMonths?: number | undefined;
+    rentalFrequencyMonths?: 1 | 3 | 6 | 10 | 12 | 11 | undefined;
+    securityDeposit?: number | undefined;
+    moveInDate?: string | undefined;
+    expectedVacatingDate?: string | undefined;
+    lockInEndDate?: string | undefined;
+    notes?: string | undefined;
+    onboardingKey?: string | undefined;
+    openingBalances?: {
+        amount: number;
+        dueDate: string;
+        type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+        description?: string | undefined;
+        attachmentUrls?: string[] | undefined;
+        dueEndDate?: string | undefined;
+        collectedAmount?: number | undefined;
+        collectionDate?: string | undefined;
+        collectionMode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
+    }[] | undefined;
+    initialRent?: "CREATE" | "SKIP" | undefined;
+}>;
+export type CreateResidentDto = z.infer<typeof createResidentSchema>;
+export declare const updateResidentSchema: z.ZodObject<{
+    firstName: z.ZodOptional<z.ZodString>;
+    lastName: z.ZodOptional<z.ZodString>;
+    email: z.ZodOptional<z.ZodString>;
+    mobile: z.ZodOptional<z.ZodString>;
+    whatsappNumber: z.ZodOptional<z.ZodString>;
+    alternatePhone: z.ZodOptional<z.ZodString>;
+    sendWhatsappReminder: z.ZodOptional<z.ZodBoolean>;
+    stayType: z.ZodOptional<z.ZodEnum<["LONG_TERM", "SHORT_TERM"]>>;
+    tenantType: z.ZodOptional<z.ZodEnum<["STUDENT", "PROFESSIONAL", "BACHELOR", "FAMILY", "COUPLE", "STAFF", "OTHER"]>>;
+    noticePeriodDays: z.ZodOptional<z.ZodNumber>;
+    agreementPeriodMonths: z.ZodOptional<z.ZodNumber>;
+    emergencyContact: z.ZodOptional<z.ZodString>;
+    permanentAddress: z.ZodOptional<z.ZodString>;
+    parentName: z.ZodOptional<z.ZodString>;
+    parentPhone: z.ZodOptional<z.ZodString>;
+    idProofUrl: z.ZodOptional<z.ZodString>;
+    agreementUrl: z.ZodOptional<z.ZodString>;
+    profession: z.ZodOptional<z.ZodNativeEnum<{
+        STUDENT: "STUDENT";
+        WORKING_PROFESSIONAL: "WORKING_PROFESSIONAL";
+        SELF_EMPLOYED: "SELF_EMPLOYED";
+        OTHER: "OTHER";
+    }>>;
+    monthlyRent: z.ZodOptional<z.ZodNumber>;
+    status: z.ZodOptional<z.ZodNativeEnum<{
+        PENDING_MOVE_IN: "PENDING_MOVE_IN";
+        ACTIVE: "ACTIVE";
+        NOTICE_PERIOD: "NOTICE_PERIOD";
+        MOVED_OUT: "MOVED_OUT";
+        ARCHIVED: "ARCHIVED";
+    }>>;
+    expectedVacatingDate: z.ZodEffects<z.ZodOptional<z.ZodString>, Date | undefined, string | undefined>;
+    lockInEndDate: z.ZodEffects<z.ZodOptional<z.ZodString>, Date | undefined, string | undefined>;
+    rentDueDay: z.ZodOptional<z.ZodNumber>;
+    notes: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
+    email?: string | undefined;
+    mobile?: string | undefined;
+    firstName?: string | undefined;
+    lastName?: string | undefined;
+    rentDueDay?: number | undefined;
+    whatsappNumber?: string | undefined;
+    alternatePhone?: string | undefined;
+    sendWhatsappReminder?: boolean | undefined;
+    emergencyContact?: string | undefined;
+    permanentAddress?: string | undefined;
+    parentName?: string | undefined;
+    parentPhone?: string | undefined;
+    idProofUrl?: string | undefined;
+    agreementUrl?: string | undefined;
+    profession?: "OTHER" | "STUDENT" | "WORKING_PROFESSIONAL" | "SELF_EMPLOYED" | undefined;
+    stayType?: "LONG_TERM" | "SHORT_TERM" | undefined;
+    tenantType?: "STAFF" | "OTHER" | "STUDENT" | "PROFESSIONAL" | "BACHELOR" | "FAMILY" | "COUPLE" | undefined;
+    noticePeriodDays?: number | undefined;
+    agreementPeriodMonths?: number | undefined;
+    monthlyRent?: number | undefined;
+    expectedVacatingDate?: Date | undefined;
+    lockInEndDate?: Date | undefined;
+    notes?: string | undefined;
+}, {
+    status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
+    email?: string | undefined;
+    mobile?: string | undefined;
+    firstName?: string | undefined;
+    lastName?: string | undefined;
+    rentDueDay?: number | undefined;
+    whatsappNumber?: string | undefined;
+    alternatePhone?: string | undefined;
+    sendWhatsappReminder?: boolean | undefined;
+    emergencyContact?: string | undefined;
+    permanentAddress?: string | undefined;
+    parentName?: string | undefined;
+    parentPhone?: string | undefined;
+    idProofUrl?: string | undefined;
+    agreementUrl?: string | undefined;
+    profession?: "OTHER" | "STUDENT" | "WORKING_PROFESSIONAL" | "SELF_EMPLOYED" | undefined;
+    stayType?: "LONG_TERM" | "SHORT_TERM" | undefined;
+    tenantType?: "STAFF" | "OTHER" | "STUDENT" | "PROFESSIONAL" | "BACHELOR" | "FAMILY" | "COUPLE" | undefined;
+    noticePeriodDays?: number | undefined;
+    agreementPeriodMonths?: number | undefined;
+    monthlyRent?: number | undefined;
+    expectedVacatingDate?: string | undefined;
+    lockInEndDate?: string | undefined;
+    notes?: string | undefined;
+}>;
+export type UpdateResidentDto = z.infer<typeof updateResidentSchema>;
+export declare const reallocateResidentSchema: z.ZodObject<{
+    propertyId: z.ZodOptional<z.ZodString>;
+    roomId: z.ZodString;
+    bedId: z.ZodOptional<z.ZodString>;
+    newRentAmount: z.ZodOptional<z.ZodNumber>;
+    reason: z.ZodDefault<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    roomId: string;
+    reason: string;
+    propertyId?: string | undefined;
+    bedId?: string | undefined;
+    newRentAmount?: number | undefined;
+}, {
+    roomId: string;
+    propertyId?: string | undefined;
+    bedId?: string | undefined;
+    newRentAmount?: number | undefined;
+    reason?: string | undefined;
+}>;
+export type ReallocateResidentDto = z.infer<typeof reallocateResidentSchema>;
+export declare const swapBedsSchema: z.ZodObject<{
+    residentOneId: z.ZodString;
+    residentTwoId: z.ZodString;
+    reason: z.ZodDefault<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    reason: string;
+    residentOneId: string;
+    residentTwoId: string;
+}, {
+    residentOneId: string;
+    residentTwoId: string;
+    reason?: string | undefined;
+}>;
+export type SwapBedsDto = z.infer<typeof swapBedsSchema>;
+export declare const moveOutSchema: z.ZodObject<{
+    moveOutDate: z.ZodEffects<z.ZodDefault<z.ZodString>, Date, string | undefined>;
+    notes: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    moveOutDate: Date;
+    notes?: string | undefined;
+}, {
+    moveOutDate?: string | undefined;
+    notes?: string | undefined;
+}>;
+export type MoveOutDto = z.infer<typeof moveOutSchema>;
+export declare const queryResidentsSchema: z.ZodObject<{
+    propertyId: z.ZodOptional<z.ZodString>;
+    status: z.ZodOptional<z.ZodNativeEnum<{
+        PENDING_MOVE_IN: "PENDING_MOVE_IN";
+        ACTIVE: "ACTIVE";
+        NOTICE_PERIOD: "NOTICE_PERIOD";
+        MOVED_OUT: "MOVED_OUT";
+        ARCHIVED: "ARCHIVED";
+    }>>;
+    search: z.ZodOptional<z.ZodString>;
+    page: z.ZodDefault<z.ZodNumber>;
+    limit: z.ZodDefault<z.ZodNumber>;
+}, "strip", z.ZodTypeAny, {
+    limit: number;
+    page: number;
+    search?: string | undefined;
+    status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
+    propertyId?: string | undefined;
+}, {
+    search?: string | undefined;
+    status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
+    limit?: number | undefined;
+    page?: number | undefined;
+    propertyId?: string | undefined;
+}>;
+export type QueryResidentsDto = z.infer<typeof queryResidentsSchema>;
+export declare const noticeSchema: z.ZodObject<{
+    date: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, Date, string>;
+    reason: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    date: Date;
+    reason: string;
+}, {
+    date: string;
+    reason: string;
+}>;
+export type NoticeDto = z.infer<typeof noticeSchema>;
+export declare const bulkMoveOutSchema: z.ZodObject<{
+    moveOutDate: z.ZodEffects<z.ZodDefault<z.ZodString>, Date, string | undefined>;
+    notes: z.ZodOptional<z.ZodString>;
+} & {
+    residentIds: z.ZodEffects<z.ZodArray<z.ZodString, "many">, string[], string[]>;
+    archive: z.ZodDefault<z.ZodBoolean>;
+}, "strip", z.ZodTypeAny, {
+    moveOutDate: Date;
+    archive: boolean;
+    residentIds: string[];
+    notes?: string | undefined;
+}, {
+    residentIds: string[];
+    moveOutDate?: string | undefined;
+    notes?: string | undefined;
+    archive?: boolean | undefined;
+}>;
+export type BulkMoveOutDto = z.infer<typeof bulkMoveOutSchema>;

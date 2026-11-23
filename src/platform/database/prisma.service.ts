@@ -19,7 +19,7 @@ export class PrismaService
 
   constructor() {
     let datasourceUrl: string | undefined = undefined;
-    const rawUrl = process.env['DATABASE_URL'];
+    const rawUrl = process.env['DATABASE_URL']?.trim().replace(/^["']|["']$/g, '');
     if (rawUrl) {
       try {
         const parsed = new URL(rawUrl);
@@ -27,19 +27,17 @@ export class PrismaService
           process.env['IS_WORKER'] === 'true' ||
           process.argv.some((arg) => arg.includes('worker'));
 
+        // Clean any stray quote or non-digit chars from connection_limit
+        const rawLimit = parsed.searchParams.get('connection_limit')?.replace(/[^0-9]/g, '');
+        const existingLimit = rawLimit ? Number(rawLimit) : null;
+
         // Bound connection limits safely to prevent exceeding Supabase Supavisor pool limits (15 in session mode)
-        const existingLimit = parsed.searchParams.get('connection_limit');
         if (isWorker) {
           parsed.searchParams.set('connection_limit', '2');
-        } else if (!existingLimit || Number(existingLimit) > 5) {
+        } else if (!existingLimit || existingLimit > 5) {
           parsed.searchParams.set('connection_limit', '4');
-        }
-
-        if (!parsed.searchParams.has('connect_timeout')) {
-          parsed.searchParams.set('connect_timeout', '15');
-        }
-        if (!parsed.searchParams.has('pool_timeout')) {
-          parsed.searchParams.set('pool_timeout', '30');
+        } else {
+          parsed.searchParams.set('connection_limit', String(existingLimit));
         }
 
         datasourceUrl = parsed.toString();

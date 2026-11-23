@@ -1,0 +1,138 @@
+import { PrismaService } from '../../../platform/database/index.js';
+import type { Redis } from 'ioredis';
+import type { CreatePropertyDto, UpdatePropertyDto, QueryPropertiesDto } from '../api/dto/property.dto.js';
+export declare class PropertiesService {
+    private readonly prisma;
+    private readonly redis?;
+    private readonly logger;
+    constructor(prisma: PrismaService, redis?: Redis | undefined);
+    private getCached;
+    private setCached;
+    invalidatePropertyCache(orgId: string): Promise<void>;
+    private logAudit;
+    create(dto: CreatePropertyDto, orgId: string, userId: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.PropertyStatus;
+        type: import("@prisma/client").$Enums.PropertyType;
+        name: string;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        addressLine1: string;
+        addressLine2: string | null;
+        city: string;
+        state: string;
+        pincode: string;
+        country: string;
+        ownerName: string | null;
+        contactPhone: string | null;
+        contactEmail: string | null;
+        timezone: string;
+        rentDueDay: number;
+        amenities: string[];
+        totalFloors: number | null;
+    }>;
+    findAll(orgId: string, query: QueryPropertiesDto): Promise<any>;
+    findById(id: string, orgId: string): Promise<{
+        stats: {
+            totalRooms: number;
+            totalBeds: number;
+            occupiedBeds: number;
+            availableBeds: number;
+            occupancyRate: number;
+            activeResidents: number;
+            activeStaff: number;
+            pendingComplaints: number;
+        };
+        _count: undefined;
+        id: string;
+        status: import("@prisma/client").$Enums.PropertyStatus;
+        type: import("@prisma/client").$Enums.PropertyType;
+        name: string;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        addressLine1: string;
+        addressLine2: string | null;
+        city: string;
+        state: string;
+        pincode: string;
+        country: string;
+        ownerName: string | null;
+        contactPhone: string | null;
+        contactEmail: string | null;
+        timezone: string;
+        rentDueDay: number;
+        amenities: string[];
+        totalFloors: number | null;
+    }>;
+    update(id: string, dto: UpdatePropertyDto, orgId: string, userId: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.PropertyStatus;
+        type: import("@prisma/client").$Enums.PropertyType;
+        name: string;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        addressLine1: string;
+        addressLine2: string | null;
+        city: string;
+        state: string;
+        pincode: string;
+        country: string;
+        ownerName: string | null;
+        contactPhone: string | null;
+        contactEmail: string | null;
+        timezone: string;
+        rentDueDay: number;
+        amenities: string[];
+        totalFloors: number | null;
+    }>;
+    archive(id: string, orgId: string, userId: string): Promise<{
+        success: boolean;
+        message: string;
+    }>;
+    getOccupancyMap(propertyId: string, orgId: string): Promise<{
+        property: {
+            id: string;
+            name: string;
+            type: import("@prisma/client").$Enums.PropertyType;
+        };
+        summary: {
+            totalRooms: number;
+            totalBeds: number;
+            occupiedBeds: number;
+            availableBeds: number;
+            occupancyRate: number;
+        };
+        floors: {
+            floor: string;
+            rooms: {
+                id: string;
+                roomNumber: string;
+                sharingType: import("@prisma/client").$Enums.SharingType;
+                rentAmount: number;
+                status: import("@prisma/client").$Enums.RoomStatus;
+                amenities: string[];
+                beds: {
+                    id: string;
+                    bedNumber: string;
+                    status: "ARCHIVED" | "UNDER_MAINTENANCE" | "AVAILABLE" | "OCCUPIED";
+                    rentAmount: number;
+                    resident: {
+                        id: string;
+                        status: import("@prisma/client").$Enums.ResidentStatus;
+                        mobile: string;
+                        firstName: string;
+                        lastName: string | null;
+                        monthlyRent: number;
+                        joiningDate: Date;
+                    };
+                }[];
+            }[];
+        }[];
+    }>;
+}

@@ -1,0 +1,1 @@
+{"version":3,"file":"admin-request.js","sourceRoot":"","sources":["../../../../src/modules/admin/api/admin-request.ts"],"names":[],"mappings":"AAGA,MAAM,UAAU,oBAAoB,CAAC,OAAgB;IACnD,OAAO;QACL,SAAS,EAAE,OAAO,CAAC,EAAE;QACrB,SAAS,EAAE,OAAO,CAAC,OAAO,CAAC,YAAY,CAAC;KACzC,CAAC;AACJ,CAAC"}

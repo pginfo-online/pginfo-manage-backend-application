@@ -1,0 +1,87 @@
+import { PrismaService } from '../../../platform/database/index.js';
+import type { PlatformAdminContext } from '../domain/admin-permissions.js';
+import type { ReviewPayoutDto, UpdateBedStatusDto, UpdateOrganizationStatusDto, UpdatePropertyStatusDto, UpdateRoomStatusDto } from '../api/dto/admin.dto.js';
+import { AdminAuditService, type AdminRequestMetadata } from './admin-audit.service.js';
+export declare class AdminCommandService {
+    private readonly prisma;
+    private readonly audit;
+    constructor(prisma: PrismaService, audit: AdminAuditService);
+    updateOrganizationStatus(id: string, dto: UpdateOrganizationStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
+        id: string;
+        name: string;
+        isActive: boolean;
+        createdAt: Date;
+        updatedAt: Date;
+        slug: string;
+    }>;
+    updatePropertyStatus(id: string, dto: UpdatePropertyStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.PropertyStatus;
+        type: import("@prisma/client").$Enums.PropertyType;
+        name: string;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        addressLine1: string;
+        addressLine2: string | null;
+        city: string;
+        state: string;
+        pincode: string;
+        country: string;
+        ownerName: string | null;
+        contactPhone: string | null;
+        contactEmail: string | null;
+        timezone: string;
+        rentDueDay: number;
+        amenities: string[];
+        totalFloors: number | null;
+    }>;
+    updateRoomStatus(id: string, dto: UpdateRoomStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.RoomStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        amenities: string[];
+        propertyId: string;
+        roomNumber: string;
+        floor: string;
+        sharingType: import("@prisma/client").$Enums.SharingType;
+        rentAmount: number;
+        availableFrom: Date | null;
+        unitType: string;
+        gender: string;
+        remarks: string | null;
+        lockInPeriod: string | null;
+        dailyStayMinPaise: number | null;
+        dailyStayMaxPaise: number | null;
+        areaSqft: number | null;
+        isDisabledForRent: boolean;
+        isPublished: boolean;
+        images: string[];
+        isVerified: boolean;
+    }>;
+    updateBedStatus(id: string, dto: UpdateBedStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.BedStatus;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        rentAmount: number | null;
+        remarks: string | null;
+        isDisabledForRent: boolean;
+        roomId: string;
+        bedNumber: string;
+    }>;
+    reviewPayout(id: string, dto: ReviewPayoutDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.PayoutAccountStatus;
+        updatedAt: Date;
+        organizationId: string;
+        businessName: string;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
+        accountNumberMasked: string;
+    }>;
+}

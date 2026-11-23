@@ -1,0 +1,699 @@
+var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
+    var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
+    if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
+    else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
+    return c > 3 && r && Object.defineProperty(target, key, r), r;
+};
+var __metadata = (this && this.__metadata) || function (k, v) {
+    if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
+};
+var __param = (this && this.__param) || function (paramIndex, decorator) {
+    return function (target, key) { decorator(target, key, paramIndex); }
+};
+var RazorpayWebhookService_1;
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
+import { PrismaService } from '../../../platform/database/index.js';
+import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
+import { UnauthorizedError } from '../../../common/errors/index.js';
+import { Monetary } from '../domain/monetary.js';
+import { WHATSAPP_ADAPTER, EMAIL_ADAPTER, } from '../../communications/domain/notification.interfaces.js';
+import { dateKeyInTimeZone } from '../../../common/time/property-date.js';
+import { MoneyLinksService } from './money-links.service.js';
+import { PaymentsService } from './payments.service.js';
+let RazorpayWebhookService = RazorpayWebhookService_1 = class RazorpayWebhookService {
+    prisma;
+    razorpayAdapter;
+    config;
+    whatsappAdapter;
+    emailAdapter;
+    paymentsService;
+    moneyLinks;
+    logger = new Logger(RazorpayWebhookService_1.name);
+    constructor(prisma, razorpayAdapter, config, whatsappAdapter, emailAdapter, paymentsService, moneyLinks) {
+        this.prisma = prisma;
+        this.razorpayAdapter = razorpayAdapter;
+        this.config = config;
+        this.whatsappAdapter = whatsappAdapter;
+        this.emailAdapter = emailAdapter;
+        this.paymentsService = paymentsService;
+        this.moneyLinks = moneyLinks;
+    }
+    getPlatformFeePaise() {
+        return this.config.get('PLATFORM_FEE_PAISE') ?? 3000;
+    }
+    async handleWebhook(rawBody, signature, providerEventId) {
+        const isValid = this.razorpayAdapter.verifyWebhookSignature(rawBody, signature);
+        if (!isValid) {
+            this.logger.warn('Razorpay webhook HMAC signature verification failed');
+            throw new UnauthorizedError('Invalid webhook signature');
+        }
+        let event;
+        try {
+            event = JSON.parse(rawBody);
+        }
+        catch {
+            this.logger.error('Failed to parse webhook JSON body');
+            return { status: 'bad_request', message: 'Invalid JSON payload' };
+        }
+        const eventId = providerEventId ||
+            event.id ||
+            `evt_${createHash('sha256').update(rawBody).digest('hex').slice(0, 32)}`;
+        const existingEvent = await this.prisma.webhookEvent.findUnique({
+            where: { eventId },
+        });
+        if (existingEvent && existingEvent.status !== 'FAILED') {
+            this.logger.log(`Webhook event ${eventId} (${event.event}) already processed. Skipping idempotently.`);
+            return {
+                status: 'already_processed',
+                eventId,
+                processedAt: existingEvent.processedAt,
+            };
+        }
+        this.logger.log(`Processing authoritative webhook event: ${event.event} [${eventId}]`);
+        try {
+            switch (event.event) {
+                case 'payment_link.paid': {
+                    const link = event.payload.payment_link?.entity;
+                    const paid = event.payload.payment?.entity;
+                    if (link && paid && paid.status === 'captured')
+                        await this.paymentsService?.captureOnlinePayment({
+                            linkId: link.id,
+                            referenceId: link.reference_id,
+                            gatewayPaymentId: paid.id,
+                            amount: paid.amount,
+                            currency: paid.currency,
+                        });
+                    break;
+                }
+                case 'subscription.authenticated':
+                case 'order.authorized':
+                    await this.handleSubscriptionAuthenticated(event);
+                    break;
+                case 'subscription.charged':
+                    await this.handleSubscriptionCharged(event);
+                    break;
+                case 'payment.captured':
+                    if (event.payload.payment?.entity?.subscription_id) {
+                        await this.handleSubscriptionCharged(event);
+                    }
+                    else {
+                        await this.handleOneTimePaymentCaptured(event);
+                    }
+                    break;
+                case 'subscription.pending':
+                case 'payment.failed':
+                    await this.handlePaymentFailed(event);
+                    break;
+                case 'subscription.cancelled':
+                case 'subscription.paused':
+                    await this.handleSubscriptionCancelledOrPaused(event);
+                    break;
+                default:
+                    this.logger.log(`Unhandled Razorpay event type: ${event.event}`);
+                    break;
+            }
+            const successEvent = {
+                data: {
+                    eventId,
+                    eventType: event.event,
+                    payload: event,
+                    status: 'SUCCESS',
+                },
+            };
+            if (existingEvent?.status === 'FAILED')
+                await this.prisma.webhookEvent.update({
+                    where: { eventId },
+                    data: { status: 'SUCCESS', error: null, processedAt: new Date() },
+                });
+            else
+                await this.prisma.webhookEvent.create(successEvent);
+            return { received: true, event: event.event, eventId };
+        }
+        catch (err) {
+            const errorMsg = err.message;
+            this.logger.error(`Error processing webhook event ${event.event}: ${errorMsg}`, err.stack);
+            try {
+                await this.prisma.webhookEvent.create({
+                    data: {
+                        eventId,
+                        eventType: event.event,
+                        payload: event,
+                        status: 'FAILED',
+                        error: errorMsg,
+                    },
+                });
+            }
+            catch {
+            }
+            throw err;
+        }
+    }
+    async handleSubscriptionAuthenticated(event) {
+        const sub = event.payload.subscription?.entity;
+        const payment = event.payload.payment?.entity;
+        const subscriptionId = sub?.id || payment?.subscription_id;
+        if (!subscriptionId) {
+            this.logger.warn('No subscription_id found in subscription.authenticated event');
+            return;
+        }
+        const mandate = await this.prisma.tenantMandate.findUnique({
+            where: { razorpaySubscriptionId: subscriptionId },
+            include: { tenant: true, property: true },
+        });
+        if (!mandate) {
+            this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+            return;
+        }
+        const customerId = sub?.customer_id;
+        const tokenId = sub?.token_id;
+        const bankRef = payment?.acquirer_data?.bank_transaction_id ||
+            payment?.acquirer_data?.upi_transaction_id ||
+            payment?.bank ||
+            payment?.vpa ||
+            'UPI_AUTOPAY';
+        await this.prisma.tenantMandate.update({
+            where: { id: mandate.id },
+            data: {
+                status: 'ACTIVE',
+                razorpayCustomerId: customerId,
+                razorpayTokenId: tokenId,
+                bankReference: bankRef,
+                startedAt: new Date(),
+                collectionMode: 'AUTOPAY',
+            },
+        });
+        await this.prisma.auditLog.create({
+            data: {
+                organizationId: mandate.organizationId,
+                action: 'rent.mandate_activated',
+                entityType: 'TenantMandate',
+                entityId: mandate.id,
+                metadata: {
+                    subscriptionId,
+                    customerId,
+                    tokenId,
+                    bankRef,
+                },
+            },
+        });
+        this.logger.log(`Mandate ${mandate.id} activated for tenant ${mandate.tenant.firstName}`);
+    }
+    async handleSubscriptionCharged(event) {
+        const payment = event.payload.payment?.entity;
+        const sub = event.payload.subscription?.entity;
+        const paymentId = payment?.id;
+        const subscriptionId = payment?.subscription_id || sub?.id;
+        const totalAmount = payment?.amount;
+        if (!paymentId ||
+            !subscriptionId ||
+            !Number.isSafeInteger(totalAmount) ||
+            !totalAmount ||
+            totalAmount <= 0 ||
+            (payment?.currency && payment.currency !== 'INR')) {
+            this.logger.warn('Incomplete payment/subscription details in subscription.charged event');
+            return;
+        }
+        const mandate = await this.prisma.tenantMandate.findUnique({
+            where: { razorpaySubscriptionId: subscriptionId },
+            include: {
+                tenant: true,
+                property: true,
+                unit: true,
+                landlordPayoutAccount: true,
+            },
+        });
+        if (!mandate) {
+            this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+            return;
+        }
+        const now = event.created_at
+            ? new Date(event.created_at * 1000)
+            : new Date();
+        const propertyDate = dateKeyInTimeZone(now, mandate.property.timezone);
+        const billingMonth = Number(propertyDate.slice(5, 7));
+        const billingYear = Number(propertyDate.slice(0, 4));
+        const platformFee = this.getPlatformFeePaise();
+        const transferAmount = Math.max(0, totalAmount - platformFee);
+        const invoiceNumber = `INV-${billingYear}${String(billingMonth).padStart(2, '0')}-${mandate.tenantId.slice(0, 8).toUpperCase()}`;
+        const capture = await this.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id FROM residents WHERE id=${mandate.tenantId}::uuid FOR UPDATE`;
+            const previous = await tx.payment.findUnique({
+                where: { razorpayPaymentId: paymentId },
+                select: { id: true },
+            });
+            if (previous)
+                return null;
+            const settledInvoice = await tx.rentInvoice.findUnique({
+                where: {
+                    tenantId_billingMonth_billingYear: {
+                        tenantId: mandate.tenantId,
+                        billingMonth,
+                        billingYear,
+                    },
+                },
+                select: { status: true },
+            });
+            const alreadySettled = settledInvoice?.status === 'PAID';
+            const inv = await tx.rentInvoice.upsert({
+                where: {
+                    tenantId_billingMonth_billingYear: {
+                        tenantId: mandate.tenantId,
+                        billingMonth,
+                        billingYear,
+                    },
+                },
+                create: {
+                    organizationId: mandate.organizationId,
+                    tenantId: mandate.tenantId,
+                    propertyId: mandate.propertyId,
+                    unitId: mandate.unitId,
+                    mandateId: mandate.id,
+                    invoiceNumber,
+                    billingMonth,
+                    billingYear,
+                    amount: totalAmount,
+                    platformFee,
+                    transferAmount,
+                    status: 'PAID',
+                    collectionType: 'AUTOPAY',
+                    dueDate: new Date(Date.UTC(billingYear, billingMonth - 1, mandate.billingDay)),
+                    paidAt: now,
+                    razorpayPaymentId: paymentId,
+                },
+                update: alreadySettled
+                    ? {}
+                    : {
+                        status: 'PAID',
+                        paidAt: now,
+                        collectionType: 'AUTOPAY',
+                        razorpayPaymentId: paymentId,
+                        amount: totalAmount,
+                        platformFee,
+                        transferAmount,
+                    },
+            });
+            await tx.tenantMandate.update({
+                where: { id: mandate.id },
+                data: {
+                    paidCount: { increment: 1 },
+                    ...(!['REVOKED', 'PAUSED'].includes(mandate.status)
+                        ? { status: 'ACTIVE' }
+                        : {}),
+                },
+            });
+            const billingRecord = await tx.billingRecord.findFirst({
+                where: {
+                    residentId: mandate.tenantId,
+                    organizationId: mandate.organizationId,
+                    propertyId: mandate.propertyId,
+                    type: 'RENT',
+                    billingMonth,
+                    billingYear,
+                },
+            });
+            const canAllocate = !alreadySettled &&
+                billingRecord &&
+                ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'].includes(billingRecord.status) &&
+                billingRecord.amount - billingRecord.paidAmount >= totalAmount;
+            if (canAllocate) {
+                const paidAmount = billingRecord.paidAmount + totalAmount;
+                await tx.billingRecord.update({
+                    where: { id: billingRecord.id, version: billingRecord.version },
+                    data: {
+                        status: paidAmount === billingRecord.amount ? 'PAID' : 'PARTIALLY_PAID',
+                        paidAmount,
+                        version: { increment: 1 },
+                    },
+                });
+                await tx.rentInvoice.update({
+                    where: { id: inv.id },
+                    data: { billingRecordId: billingRecord.id },
+                });
+            }
+            await tx.payment.create({
+                data: {
+                    organizationId: mandate.organizationId,
+                    residentId: mandate.tenantId,
+                    billingRecordId: canAllocate ? billingRecord.id : undefined,
+                    amount: totalAmount,
+                    status: canAllocate ? 'CONFIRMED' : 'DISPUTED',
+                    mode: 'RAZORPAY',
+                    collectionDate: now,
+                    razorpayPaymentId: paymentId,
+                    reference: `AutoPay Mandate ${mandate.razorpaySubscriptionId}`,
+                    notes: `Rent Autopay for ${billingMonth}/${billingYear}`,
+                },
+            });
+            if (!canAllocate) {
+                await tx.auditLog.create({
+                    data: {
+                        organizationId: mandate.organizationId,
+                        action: 'payment.reconciliation_required',
+                        entityType: 'RentInvoice',
+                        entityId: inv.id,
+                        metadata: {
+                            paymentId,
+                            amount: totalAmount,
+                            reason: 'Rent due missing or changed',
+                        },
+                    },
+                });
+            }
+            if (canAllocate && transferAmount > 0) {
+                await tx.auditLog.create({
+                    data: {
+                        organizationId: mandate.organizationId,
+                        action: 'payment.route_transfer_pending',
+                        entityType: 'RentInvoice',
+                        entityId: inv.id,
+                        metadata: { paymentId, amount: transferAmount },
+                    },
+                });
+            }
+            return { invoice: inv, canAllocate };
+        });
+        if (!capture?.canAllocate)
+            return;
+        const { invoice } = capture;
+        let transferId = null;
+        const payout = mandate.landlordPayoutAccount;
+        const metadata = payout?.metadata;
+        const routeProductId = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+            ? metadata.routeProductId
+            : null;
+        const linkedAccountId = payout?.status === 'ACTIVE' &&
+            payout.kycStatus === 'VERIFIED' &&
+            typeof routeProductId === 'string' &&
+            routeProductId.startsWith('acc_prd_') &&
+            payout.razorpayAccountId.startsWith('acc_') &&
+            !payout.razorpayAccountId.startsWith('acc_sim_')
+            ? payout.razorpayAccountId
+            : null;
+        if (linkedAccountId && transferAmount > 0) {
+            try {
+                const transferResult = await this.razorpayAdapter.transferPayment(paymentId, {
+                    account: linkedAccountId,
+                    amount: transferAmount,
+                    currency: 'INR',
+                    notes: {
+                        invoiceId: invoice.id,
+                        rentPeriod: `${billingMonth}/${billingYear}`,
+                        tenantId: mandate.tenantId,
+                    },
+                });
+                await this.prisma.rentInvoice.update({
+                    where: { id: invoice.id },
+                    data: { razorpayTransferId: transferResult.transferId },
+                });
+                transferId = transferResult.transferId;
+                this.logger.log(`Razorpay Route transfer ${transferId} executed: ₹${Monetary.toRupees(transferAmount)} routed to ${linkedAccountId}`);
+            }
+            catch (err) {
+                this.logger.error(`Failed to execute Route transfer for invoice ${invoice.id}: ${err.message}`);
+            }
+        }
+        else {
+            this.logger.warn(`Skipped Route transfer: linkedAccountId is ${linkedAccountId ?? 'MISSING'}, transferAmount is ${transferAmount}`);
+        }
+        if (transferAmount > 0 && !transferId) {
+            await this.prisma.auditLog.create({
+                data: {
+                    organizationId: mandate.organizationId,
+                    action: 'payment.route_transfer_reconciliation_required',
+                    entityType: 'RentInvoice',
+                    entityId: invoice.id,
+                    metadata: {
+                        paymentId,
+                        amount: transferAmount,
+                        reason: linkedAccountId
+                            ? 'Provider transfer result needs review'
+                            : 'Owner account is not verified for Route',
+                    },
+                },
+            });
+        }
+        await this.sendReceiptNotifications(mandate, totalAmount, platformFee, transferId ? transferAmount : null, billingMonth, billingYear, paymentId);
+    }
+    async sendReceiptNotifications(mandate, totalAmount, platformFee, transferAmount, month, year, paymentId) {
+        const rentRupees = Monetary.toRupees(totalAmount);
+        const unitStr = mandate.unit
+            ? `Unit ${mandate.unit.roomNumber}`
+            : 'your unit';
+        const tenantPhone = mandate.tenant.whatsappNumber || mandate.tenant.mobile;
+        const tenantMsg = `✅ Rent Autopay Successful!\n\n` +
+            `Dear ${mandate.tenant.firstName},\n` +
+            `Your rent of ₹${rentRupees.toLocaleString('en-IN')} for ${mandate.property.name} (${unitStr}) ` +
+            `for ${month}/${year} has been automatically collected.\n\n` +
+            `Payment Reference: ${paymentId}\n` +
+            `Thank you for paying on time!`;
+        if (this.whatsappAdapter) {
+            try {
+                await this.whatsappAdapter.send({
+                    to: tenantPhone,
+                    message: tenantMsg,
+                    templateName: 'rent_autopay_receipt',
+                    templateParams: {
+                        tenant_name: mandate.tenant.firstName,
+                        amount: `₹${rentRupees}`,
+                        month: `${month}/${year}`,
+                    },
+                });
+            }
+            catch (err) {
+                this.logger.warn(`Failed to send tenant WhatsApp receipt: ${err.message}`);
+            }
+        }
+        if (transferAmount !== null &&
+            mandate.landlordPayoutAccount?.phone &&
+            this.whatsappAdapter) {
+            const landlordMsg = `💰 Rent Received via Autopay!\n\n` +
+                `Tenant ${mandate.tenant.firstName} paid rent for ${mandate.property.name} (${unitStr}).\n` +
+                `Total Rent: ₹${rentRupees.toLocaleString('en-IN')}\n` +
+                `Platform Fee: ₹${Monetary.toRupees(platformFee)}\n` +
+                `Route transfer requested: ₹${Monetary.toRupees(transferAmount).toLocaleString('en-IN')} (bank settlement pending)\n` +
+                `Payment ID: ${paymentId}`;
+            try {
+                await this.whatsappAdapter.send({
+                    to: mandate.landlordPayoutAccount.phone,
+                    message: landlordMsg,
+                });
+            }
+            catch (err) {
+                this.logger.warn(`Failed to send landlord WhatsApp notification: ${err.message}`);
+            }
+        }
+    }
+    async handlePaymentFailed(event) {
+        const payment = event.payload.payment?.entity;
+        const sub = event.payload.subscription?.entity;
+        const subscriptionId = payment?.subscription_id || sub?.id;
+        const failureReason = payment?.error_description ||
+            payment?.error_code ||
+            'Mandate autopay charge declined by issuing bank';
+        if (!subscriptionId) {
+            this.logger.warn('No subscription_id found in payment.failed event');
+            return;
+        }
+        const mandate = await this.prisma.tenantMandate.findUnique({
+            where: { razorpaySubscriptionId: subscriptionId },
+            include: {
+                tenant: true,
+                property: true,
+                unit: true,
+                landlordPayoutAccount: true,
+            },
+        });
+        if (!mandate) {
+            this.logger.warn(`TenantMandate not found for failed subscription ${subscriptionId}`);
+            return;
+        }
+        const now = event.created_at
+            ? new Date(event.created_at * 1000)
+            : new Date();
+        const propertyDate = dateKeyInTimeZone(now, mandate.property.timezone);
+        const billingMonth = Number(propertyDate.slice(5, 7));
+        const billingYear = Number(propertyDate.slice(0, 4));
+        const key = { tenantId: mandate.tenantId, billingMonth, billingYear };
+        const settled = await this.prisma.rentInvoice.findUnique({
+            where: { tenantId_billingMonth_billingYear: key },
+            select: { status: true },
+        });
+        if (settled?.status === 'PAID')
+            return;
+        let fallbackPaymentUrl = null;
+        try {
+            const link = await this.moneyLinks?.create(mandate.tenantId, mandate.organizationId);
+            fallbackPaymentUrl = link?.paymentLink ?? null;
+        }
+        catch (err) {
+            this.logger.warn(`Unable to prepare fallback payment for mandate ${mandate.id}: ${err.message}`);
+        }
+        const invoice = await this.prisma.rentInvoice.upsert({
+            where: {
+                tenantId_billingMonth_billingYear: {
+                    tenantId: mandate.tenantId,
+                    billingMonth,
+                    billingYear,
+                },
+            },
+            create: {
+                organizationId: mandate.organizationId,
+                tenantId: mandate.tenantId,
+                propertyId: mandate.propertyId,
+                unitId: mandate.unitId,
+                mandateId: mandate.id,
+                invoiceNumber: `INV-${billingYear}${String(billingMonth).padStart(2, '0')}-${mandate.tenantId.slice(0, 8).toUpperCase()}`,
+                billingMonth,
+                billingYear,
+                amount: mandate.rentAmount,
+                platformFee: this.getPlatformFeePaise(),
+                transferAmount: Math.max(0, mandate.rentAmount - this.getPlatformFeePaise()),
+                status: 'FAILED',
+                collectionType: 'FALLBACK_LINK',
+                dueDate: new Date(Date.UTC(billingYear, billingMonth - 1, mandate.billingDay)),
+                retryCount: 0,
+                failureReason,
+                fallbackPaymentUrl,
+            },
+            update: {},
+        });
+        if (invoice.status === 'PAID')
+            return;
+        await this.prisma.rentInvoice.updateMany({
+            where: { id: invoice.id, status: { not: 'PAID' } },
+            data: {
+                status: 'FAILED',
+                retryCount: { increment: 1 },
+                failureReason,
+                fallbackPaymentUrl: fallbackPaymentUrl || undefined,
+            },
+        });
+        await this.prisma.tenantMandate.update({
+            where: { id: mandate.id },
+            data: {
+                retryCount: { increment: 1 },
+                failureReason,
+            },
+        });
+        const rentRupees = Monetary.toRupees(mandate.rentAmount);
+        const tenantPhone = mandate.tenant.whatsappNumber || mandate.tenant.mobile;
+        const alertMessage = `⚠️ Rent Autopay Failed!\n\n` +
+            `Hello ${mandate.tenant.firstName}, your scheduled rent payment of ₹${rentRupees.toLocaleString('en-IN')} ` +
+            `for ${mandate.property.name} could not be processed automatically.\n` +
+            `Reason: ${failureReason}\n\n` +
+            (fallbackPaymentUrl
+                ? `Please pay immediately via this secure one-time fallback link to avoid late fees:\n${fallbackPaymentUrl}\n\n`
+                : `Please contact your property manager to complete the rent payment.\n\n`) +
+            `Autopay will retry on the next scheduled cycle.`;
+        if (this.whatsappAdapter && mandate.tenant.sendWhatsappReminder !== false) {
+            try {
+                await this.whatsappAdapter.send({
+                    to: tenantPhone,
+                    message: alertMessage,
+                    templateName: 'rent_autopay_failed_fallback',
+                    templateParams: {
+                        tenant_name: mandate.tenant.firstName,
+                        property_name: mandate.property.name,
+                        amount: Monetary.formatINR(mandate.rentAmount),
+                        payment_link: fallbackPaymentUrl ?? 'Contact your property manager',
+                    },
+                });
+            }
+            catch (err) {
+                this.logger.warn(`Failed to send failure fallback WhatsApp: ${err.message}`);
+            }
+        }
+        this.logger.warn(`Autopay payment failed for invoice ${invoice.id}; fallback link ${fallbackPaymentUrl ? 'prepared' : 'unavailable'}`);
+    }
+    async handleSubscriptionCancelledOrPaused(event) {
+        const sub = event.payload.subscription?.entity;
+        const subscriptionId = sub?.id;
+        if (!subscriptionId) {
+            this.logger.warn('No subscription_id in cancellation event');
+            return;
+        }
+        const mandate = await this.prisma.tenantMandate.findUnique({
+            where: { razorpaySubscriptionId: subscriptionId },
+            include: {
+                tenant: true,
+                property: true,
+                unit: true,
+                landlordPayoutAccount: true,
+            },
+        });
+        if (!mandate) {
+            this.logger.warn(`TenantMandate not found for subscription ${subscriptionId}`);
+            return;
+        }
+        const isCancelled = event.event === 'subscription.cancelled';
+        const newStatus = isCancelled ? 'REVOKED' : 'PAUSED';
+        await this.prisma.tenantMandate.update({
+            where: { id: mandate.id },
+            data: {
+                status: newStatus,
+                collectionMode: 'MANUAL_COLLECTION',
+                cancelledAt: isCancelled ? new Date() : undefined,
+            },
+        });
+        const unitStr = mandate.unit
+            ? `Unit ${mandate.unit.roomNumber}`
+            : 'their unit';
+        const landlordPhone = mandate.landlordPayoutAccount?.phone;
+        if (landlordPhone && this.whatsappAdapter) {
+            const landlordAlert = `🚨 Autopay Disabled by Tenant!\n\n` +
+                `Tenant ${mandate.tenant.firstName} (${mandate.tenant.mobile}) has ${isCancelled ? 'cancelled' : 'paused'} ` +
+                `their Autopay mandate for ${mandate.property.name} (${unitStr}).\n\n` +
+                `This unit has been automatically flagged as MANUAL_COLLECTION. Please follow up directly for future rent dues.`;
+            try {
+                await this.whatsappAdapter.send({
+                    to: landlordPhone,
+                    message: landlordAlert,
+                });
+            }
+            catch (err) {
+                this.logger.warn(`Failed to notify landlord of mandate cancellation: ${err.message}`);
+            }
+        }
+        await this.prisma.auditLog.create({
+            data: {
+                organizationId: mandate.organizationId,
+                action: `rent.mandate_${isCancelled ? 'revoked' : 'paused'}`,
+                entityType: 'TenantMandate',
+                entityId: mandate.id,
+                metadata: {
+                    event: event.event,
+                    collectionMode: 'MANUAL_COLLECTION',
+                },
+            },
+        });
+        this.logger.log(`Mandate ${mandate.id} marked as ${newStatus} (MANUAL_COLLECTION)`);
+    }
+    async handleOneTimePaymentCaptured(event) {
+        const p = event.payload.payment?.entity;
+        if (!p?.order_id || p.status !== 'captured')
+            return;
+        await this.paymentsService?.captureOnlinePayment({
+            orderId: p.order_id,
+            gatewayPaymentId: p.id,
+            amount: p.amount,
+            currency: p.currency,
+        });
+    }
+};
+RazorpayWebhookService = RazorpayWebhookService_1 = __decorate([
+    Injectable(),
+    __param(3, Optional()),
+    __param(3, Inject(WHATSAPP_ADAPTER)),
+    __param(4, Optional()),
+    __param(4, Inject(EMAIL_ADAPTER)),
+    __param(5, Optional()),
+    __param(6, Optional()),
+    __metadata("design:paramtypes", [PrismaService,
+        RazorpayAdapter,
+        ConfigService, Object, Object, PaymentsService,
+        MoneyLinksService])
+], RazorpayWebhookService);
+export { RazorpayWebhookService };
+//# sourceMappingURL=razorpay-webhook.service.js.map

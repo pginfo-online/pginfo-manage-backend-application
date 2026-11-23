@@ -1,0 +1,166 @@
+import { BillingService } from '../application/billing.service.js';
+import { type DiscountDto, type CreateChargeDto, type GenerateMonthlyDuesDto, type QueryBillingDto } from './dto/billing.dto.js';
+export declare class BillingController {
+    private readonly billingService;
+    constructor(billingService: BillingService);
+    generateMonthlyDues(dto: GenerateMonthlyDuesDto, orgId: string, userId: string): Promise<{
+        billingMonth: number;
+        billingYear: number;
+        generatedCount: number;
+        skippedCount: number;
+        totalAmountPaise: number;
+    }>;
+    createCharge(dto: CreateChargeDto, orgId: string, userId: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.BillingStatus;
+        type: import("@prisma/client").$Enums.BillingType;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        propertyId: string;
+        version: number;
+        residentId: string;
+        attachmentUrls: string[];
+        amount: number;
+        paidAmount: number;
+        lateFeeAmount: number;
+        discountAmount: number;
+        billingMonth: number | null;
+        billingYear: number | null;
+        dueDate: Date;
+        periodStart: Date | null;
+        periodEnd: Date | null;
+        idempotencyKey: string | null;
+    }>;
+    findAll(query: QueryBillingDto, orgId: string): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
+        resident: {
+            room: {
+                roomNumber: string;
+            } | null;
+            bed: {
+                bedNumber: string;
+            } | null;
+            id: string;
+            mobile: string;
+            firstName: string;
+            lastName: string | null;
+        };
+    } & {
+        id: string;
+        status: import("@prisma/client").$Enums.BillingStatus;
+        type: import("@prisma/client").$Enums.BillingType;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        propertyId: string;
+        version: number;
+        residentId: string;
+        attachmentUrls: string[];
+        amount: number;
+        paidAmount: number;
+        lateFeeAmount: number;
+        discountAmount: number;
+        billingMonth: number | null;
+        billingYear: number | null;
+        dueDate: Date;
+        periodStart: Date | null;
+        periodEnd: Date | null;
+        idempotencyKey: string | null;
+    }>>;
+    findOne(id: string, orgId: string): Promise<{
+        resident: {
+            property: {
+                id: string;
+                name: string;
+            };
+            room: {
+                roomNumber: string;
+            } | null;
+            bed: {
+                bedNumber: string;
+            } | null;
+            id: string;
+            email: string | null;
+            mobile: string;
+            firstName: string;
+            lastName: string | null;
+        };
+        payments: {
+            id: string;
+            mode: import("@prisma/client").$Enums.PaymentMode;
+            amount: number;
+            collectionDate: Date;
+            reference: string | null;
+        }[];
+    } & {
+        id: string;
+        status: import("@prisma/client").$Enums.BillingStatus;
+        type: import("@prisma/client").$Enums.BillingType;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        propertyId: string;
+        version: number;
+        residentId: string;
+        attachmentUrls: string[];
+        amount: number;
+        paidAmount: number;
+        lateFeeAmount: number;
+        discountAmount: number;
+        billingMonth: number | null;
+        billingYear: number | null;
+        dueDate: Date;
+        periodStart: Date | null;
+        periodEnd: Date | null;
+        idempotencyKey: string | null;
+    }>;
+    discount(id: string, dto: DiscountDto, orgId: string, userId: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.BillingStatus;
+        type: import("@prisma/client").$Enums.BillingType;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        propertyId: string;
+        version: number;
+        residentId: string;
+        attachmentUrls: string[];
+        amount: number;
+        paidAmount: number;
+        lateFeeAmount: number;
+        discountAmount: number;
+        billingMonth: number | null;
+        billingYear: number | null;
+        dueDate: Date;
+        periodStart: Date | null;
+        periodEnd: Date | null;
+        idempotencyKey: string | null;
+    }>;
+    cancel(id: string, orgId: string, userId: string, reason?: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.BillingStatus;
+        type: import("@prisma/client").$Enums.BillingType;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        description: string | null;
+        propertyId: string;
+        version: number;
+        residentId: string;
+        attachmentUrls: string[];
+        amount: number;
+        paidAmount: number;
+        lateFeeAmount: number;
+        discountAmount: number;
+        billingMonth: number | null;
+        billingYear: number | null;
+        dueDate: Date;
+        periodStart: Date | null;
+        periodEnd: Date | null;
+        idempotencyKey: string | null;
+    }>;
+}
