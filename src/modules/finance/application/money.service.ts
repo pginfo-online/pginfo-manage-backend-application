@@ -614,7 +614,9 @@ export class MoneyService {
       const activeMandates = await tx.tenantMandate.count({
         where: {
           landlordPayoutAccountId: id,
-          status: { in: ['ACTIVE', 'PENDING', 'CREATED'] },
+          status: {
+            in: ['ACTIVE', 'PENDING', 'CREATED', 'AUTHENTICATED', 'PAUSED'],
+          },
         },
       });
       if (activeMandates && propertyId !== account.propertyId)

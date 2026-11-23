@@ -87,30 +87,26 @@ export const createResidentSchema = z.object({
   noticePeriodDays: z.number().int().min(0).max(365).optional(),
   agreementPeriodMonths: z.number().int().min(1).max(120).optional(),
   openingBalances: z.array(openingBalanceSchema).max(20).optional(),
+  rentalFrequencyMonths: z
+    .union([
+      z.literal(1),
+      z.literal(3),
+      z.literal(6),
+      z.literal(10),
+      z.literal(11),
+      z.literal(12),
+    ])
+    .optional(),
+  initialRent: z.enum(['CREATE', 'SKIP']).optional(),
   monthlyRent: z.coerce
     .number()
     .int()
     .positive('Monthly rent must be positive paise'),
   securityDeposit: z.coerce.number().int().min(0).default(0),
-  joiningDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'joiningDate must be YYYY-MM-DD')
-    .transform((d) => new Date(d)),
-  moveInDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .transform((d) => (d ? new Date(d) : undefined)),
-  expectedVacatingDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .transform((d) => (d ? new Date(d) : undefined)),
-  lockInEndDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional()
-    .transform((d) => (d ? new Date(d) : undefined)),
+  joiningDate: dateOnly,
+  moveInDate: dateOnly.optional(),
+  expectedVacatingDate: dateOnly.optional(),
+  lockInEndDate: dateOnly.optional(),
   rentDueDay: z.coerce.number().int().min(1).max(28).optional(),
   notes: z.string().optional(),
 });

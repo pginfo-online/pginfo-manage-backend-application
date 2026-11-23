@@ -8,6 +8,7 @@ export interface SendEmailOptions {
 export interface SendWhatsAppOptions {
   to: string; // Indian mobile number e.g. "9876543210"
   message: string;
+  rentReminder?: { residentName: string; balance: string };
   templateName?: string;
   templateParams?: Record<string, string>;
 }

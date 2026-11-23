@@ -116,3 +116,33 @@ Mobile tests cover metadata pagination, append retry, six tabs, swipe actions, p
 4. Uploads use the existing authenticated storage service and require its configuration. Real WhatsApp/email delivery, live gateway settlement, and device share/save behavior require the corresponding configured services; automated tests do not send real messages or move money.
 5. Old unallocated collections cannot be reliably reconstructed from current bill balances. They remain included in total collection and separately identified as unattributed. Automatic refunds and an advance wallet are outside this change; captured overpayments are retained for review.
 6. The debug Android default API URL is `http://10.0.2.2:3000/api/v1` for the emulator. A physical device needs a reachable API URL; release builds require HTTPS through `API_BASE_URL`.
+
+## Bank onboarding and where money goes
+
+### Bank
+
+An Owner or Admin opens **Money → Bank → Add Bank**, enters the beneficiary and bank details, and confirms that they can accept Razorpay's terms for that account. The currently selected property is sent with the request. With no property selected, the bank is an organization-level default. PAN can be supplied for KYC. Razorpay can still require it or other evidence for a specific business.
+
+The API uses Razorpay Route composite onboarding and submits the settlement bank details with a stable retry key. PgInfo stores the masked account number, IFSC, provider IDs and status. An account can be created while bank verification is still pending. Use **Check Razorpay verification** to refresh it after Razorpay processes any remaining requirements. A property-specific verified Route account takes precedence over a verified organization default. Legacy entries without a Route product record require onboarding before they can be used for new owner transfers. [Razorpay composite onboarding](https://razorpay.com/docs/api/payments/route/create-linked-account-composite)
+
+### Automated dues and AutoPay
+
+1. The billing worker schedules property-scoped jobs daily. The billing service finds due cycles for active and notice-period residents and inserts rent at the monthly rate multiplied by the cycle length. The billing-period uniqueness constraints make reruns safe.
+2. For monthly plans, a manager requests a mandate and shares Razorpay's authorization link. The setup requires a verified Route account for the property. Razorpay collects the tenant's consent and charges on the subscription schedule. Creating a due in PgInfo does not debit the tenant.
+3. A signed payment event is matched to its subscription and gateway payment ID. PgInfo records the captured amount, updates the invoice and applies it to rent if the outstanding bill can accept it. Duplicate captures cannot allocate again. A missing or changed bill puts the payment into review.
+4. PgInfo requests a Route transfer to the verified owner account stored on the mandate. The instructed amount is the capture less configured PgInfo platform fees. Razorpay fees, tax, refunds and adjustments can affect final settlement. A transfer reference confirms a provider transfer record. Bank credit is a separate step.
+5. If a charge fails, the tenant can pay via the standard outstanding-balance link. If a transfer fails or has an ambiguous response, reconcile the payment and transfer in Razorpay before retrying. PgInfo records the transfer requirement and flags ambiguous or failed transfer attempts for review.
+
+### Payment links and standard online checkout
+
+PgInfo reserves an expiring payment intent, creates the hosted INR link, and shares it on request. Razorpay collects the tenant's payment. A signed capture is matched to the expected link or stored intent, currency and amount. PgInfo allocates it transactionally to dues or keeps it in Payment Review if the balance changed.
+
+These links do not request a Route split. Razorpay settles the net amount to the **merchant settlement bank account attached to the configured Razorpay API credentials**. Selecting or linking a bank in PgInfo does not change that destination. The AutoPay failure link follows this same rule. If the merchant account is the operator's account, the operator must reconcile those receipts with the owner. [Razorpay Payment Links](https://razorpay.com/docs/payments/payment-links/)
+
+### Settlements and reconciliation
+
+For an AutoPay Route transfer, Razorpay credits the linked owner's verified bank account according to that linked account's settlement schedule. For a regular merchant receipt, Razorpay follows the merchant account's own cycle. Use the Razorpay Dashboard to confirm the actual schedule, holds, settlement status and UTR. PgInfo's Collection and Bank tabs show ledger and onboarding data. Settlement reconciliation is in Razorpay.
+
+For a missing bank credit, trace the payment ID to the Route transfer ID, then the linked account's settlement ID and UTR. Check for a failed or held settlement before taking action. A retry of an ambiguous provider transfer requires checking Razorpay first to prevent a second transfer. [Razorpay Route](https://razorpay.com/route/) · [Razorpay settlements](https://razorpay.com/docs/payments/settlements)
+
+Production verification requires a Route-enabled merchant, a verified linked bank, a signed staging capture and a reconciled test transfer. Settlement monitoring and reconciliation, outage recovery and load testing under representative payment and billing volumes remain release work.

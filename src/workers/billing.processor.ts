@@ -1,7 +1,8 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
-import type { Job } from 'bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Logger, type OnApplicationBootstrap } from '@nestjs/common';
+import type { Job, Queue } from 'bullmq';
 import { BillingService } from '../modules/finance/application/billing.service.js';
+import { dateKeyInTimeZone } from '../common/time/property-date.js';
 import { PrismaService } from '../platform/database/index.js';
 
 export const BILLING_QUEUE = 'billing-queue';
@@ -11,7 +12,7 @@ export interface GenerateMonthlyDuesJobData {
   propertyId?: string;
   billingMonth: number;
   billingYear: number;
-  userId: string;
+  userId?: string;
 }
 
 export interface ReconcileAutopayJobData {
@@ -22,14 +23,64 @@ export interface ReconcileAutopayJobData {
 }
 
 @Processor(BILLING_QUEUE)
-export class BillingProcessor extends WorkerHost {
+export class BillingProcessor
+  extends WorkerHost
+  implements OnApplicationBootstrap
+{
   private readonly logger = new Logger(BillingProcessor.name);
 
   constructor(
     private readonly billingService: BillingService,
     private readonly prisma: PrismaService,
+    @InjectQueue(BILLING_QUEUE)
+    private readonly queue: Queue<GenerateMonthlyDuesJobData>,
   ) {
     super();
+  }
+
+  async onApplicationBootstrap() {
+    await this.queue.upsertJobScheduler(
+      'property-rent-daily',
+      { pattern: '15 0 * * *', tz: 'Asia/Kolkata' },
+      { name: 'schedule-property-rent' },
+    );
+  }
+
+  private async enqueuePropertyDues(runAt: Date) {
+    let after: string | undefined;
+    for (;;) {
+      const properties: {
+        id: string;
+        organizationId: string;
+        timezone: string;
+      }[] = await this.prisma.property.findMany({
+        where: {
+          status: 'ACTIVE',
+          organization: { isActive: true },
+          ...(after ? { id: { gt: after } } : {}),
+        },
+        select: { id: true, organizationId: true, timezone: true },
+        orderBy: { id: 'asc' },
+        take: 100,
+      });
+      if (!properties.length) break;
+      await this.queue.addBulk(
+        properties.map((property) => {
+          const date = dateKeyInTimeZone(runAt, property.timezone);
+          return {
+            name: 'generate-monthly-dues',
+            data: {
+              organizationId: property.organizationId,
+              propertyId: property.id,
+              billingYear: Number(date.slice(0, 4)),
+              billingMonth: Number(date.slice(5, 7)),
+            },
+            opts: { jobId: ['rent', property.id, date].join('-') },
+          };
+        }),
+      );
+      after = properties.at(-1)!.id;
+    }
   }
 
   async process(
@@ -40,6 +91,8 @@ export class BillingProcessor extends WorkerHost {
     );
 
     switch (job.name) {
+      case 'schedule-property-rent':
+        return this.enqueuePropertyDues(new Date());
       case 'generate-monthly-dues': {
         const {
           organizationId,

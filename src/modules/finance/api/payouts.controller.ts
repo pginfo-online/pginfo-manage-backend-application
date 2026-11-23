@@ -4,6 +4,8 @@ import {
   Get,
   Body,
   Query,
+  Param,
+  ParseUUIDPipe,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -66,6 +68,16 @@ export class PayoutsController {
     @CurrentUserId() userId: string,
   ) {
     return this.payoutsService.onboardOwner(dto, orgId, userId);
+  }
+
+  @Post('accounts/:id/refresh')
+  @HttpCode(HttpStatus.OK)
+  @RequireOrgRoles('OWNER', 'ADMIN')
+  refreshVerification(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentOrgId() orgId: string,
+  ) {
+    return this.payoutsService.refreshVerification(id, orgId);
   }
 
   @Get('accounts')

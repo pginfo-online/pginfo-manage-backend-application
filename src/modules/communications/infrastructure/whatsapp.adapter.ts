@@ -35,18 +35,36 @@ export class WhatsAppHttpAdapter implements WhatsAppAdapter {
       const version = this.config.get('META_WHATSAPP_API_VERSION');
       const named =
         this.config.get('META_WHATSAPP_TEMPLATE_PARAMETER_FORMAT') === 'NAMED';
-      const parameters = Object.entries(options.templateParams ?? {}).map(
-        ([name, text]) => ({
-          type: 'text',
-          text,
-          ...(named ? { parameter_name: name } : {}),
-        }),
+      const reminderTemplate = this.config.get(
+        'META_WHATSAPP_RENT_REMINDER_TEMPLATE',
       );
-      const payload = options.templateName
+      const templateName =
+        options.templateName ??
+        (options.rentReminder ? reminderTemplate : undefined);
+      if (options.rentReminder && !templateName) {
+        return {
+          success: false,
+          error: 'Configure an approved WhatsApp rent reminder template',
+        };
+      }
+      const templateParams =
+        options.templateParams ??
+        (options.rentReminder
+          ? {
+              resident_name: options.rentReminder.residentName,
+              outstanding_balance: options.rentReminder.balance,
+            }
+          : {});
+      const parameters = Object.entries(templateParams).map(([name, text]) => ({
+        type: 'text',
+        text,
+        ...(named ? { parameter_name: name } : {}),
+      }));
+      const payload = templateName
         ? {
             type: 'template',
             template: {
-              name: options.templateName,
+              name: templateName,
               language: { code: language },
               ...(parameters.length
                 ? { components: [{ type: 'body', parameters }] }

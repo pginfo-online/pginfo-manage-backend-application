@@ -15,7 +15,7 @@ export class MoneyLinksService {
     private readonly gateway: RazorpayAdapter,
     private readonly money: MoneyService,
   ) {}
-  async create(residentId: string, org: string, user: string) {
+  async create(residentId: string, org: string, user?: string) {
     const context = await this.money.paymentContext(residentId, org);
     if (context.totalDues <= 0)
       throw new BadRequestException('This tenant has no outstanding dues');

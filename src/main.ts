@@ -20,7 +20,7 @@ async function bootstrap(): Promise<void> {
   // ── CORS ─────────────────────────────────────────────────
   const corsOrigins = (
     process.env['CORS_ORIGINS'] ??
-    'http://localhost:3000,http://localhost:5000,http://localhost:5173'
+    'http://localhost:3000,http://localhost:3001,http://localhost:5000,http://localhost:5173'
   )
     .split(',')
     .map((origin) => origin.trim())

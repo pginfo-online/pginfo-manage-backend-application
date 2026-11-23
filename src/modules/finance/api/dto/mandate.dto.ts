@@ -12,25 +12,47 @@ export const createMandateSchema = z
     tenant_id: z.string().uuid().optional(),
     unitId: z.string().uuid().optional(),
     unit_id: z.string().uuid().optional(),
-    rentAmount: z.coerce.number().int().positive().optional(),
-    rent_amount: z.coerce.number().int().positive().optional(),
+    rentAmount: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(2_147_483_647)
+      .optional(),
+    rent_amount: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(2_147_483_647)
+      .optional(),
     billingDay: z.coerce.number().int().min(1).max(28).optional(),
     billing_day: z.coerce.number().int().min(1).max(28).optional(),
     tenureMonths: z.coerce.number().int().min(1).max(36).optional(),
     tenure_months: z.coerce.number().int().min(1).max(36).optional(),
     mandateChannel: z.nativeEnum(MandateChannel).optional(),
     mandate_channel: z.nativeEnum(MandateChannel).optional(),
-    sendWhatsAppNotification: z.coerce.boolean().default(true),
+    sendWhatsAppNotification: z
+      .union([z.boolean(), z.enum(['true', 'false'])])
+      .default(true)
+      .transform((value) => value === true || value === 'true'),
   })
-  .transform((data) => {
+  .transform((data, ctx) => {
     const tenantId = data.tenantId ?? data.tenant_id;
     if (!tenantId) {
-      throw new Error('tenant_id or tenantId is required');
+      ctx.addIssue({
+        code: 'custom',
+        path: ['tenantId'],
+        message: 'Tenant is required',
+      });
     }
     const rentAmount = data.rentAmount ?? data.rent_amount;
     if (!rentAmount) {
-      throw new Error('rent_amount or rentAmount is required');
+      ctx.addIssue({
+        code: 'custom',
+        path: ['rentAmount'],
+        message: 'Rent amount is required',
+      });
     }
+    if (!tenantId || !rentAmount) return z.NEVER;
 
     return {
       tenantId,

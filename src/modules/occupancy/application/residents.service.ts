@@ -59,6 +59,7 @@ export class ResidentsService {
               propertyId: dto.propertyId,
               organizationId: orgId,
               status: { not: 'ARCHIVED' },
+              isDisabledForRent: false,
             },
             select: { id: true },
           })
@@ -69,6 +70,7 @@ export class ResidentsService {
               id: dto.bedId,
               organizationId: orgId,
               room: { propertyId: dto.propertyId },
+              isDisabledForRent: false,
             },
             select: {
               id: true,
@@ -104,6 +106,16 @@ export class ResidentsService {
       );
     }
 
+    const frequency = dto.rentalFrequencyMonths ?? 1;
+    if (dto.monthlyRent * frequency > 2_147_483_647) {
+      throw new BadRequestException(
+        'The rent for one billing period is too large',
+      );
+    }
+    const rentStart = dto.moveInDate ?? dto.joiningDate;
+    const billingYear = rentStart.getUTCFullYear();
+    const billingMonth = rentStart.getUTCMonth() + 1;
+
     const initialStatus: ResidentStatus =
       dateOnlyKey(dto.joiningDate) >
       dateKeyInTimeZone(new Date(), property.timezone)
@@ -117,6 +129,7 @@ export class ResidentsService {
             id: dto.bedId,
             organizationId: orgId,
             status: 'AVAILABLE',
+            isDisabledForRent: false,
           },
           data: {
             status: initialStatus === 'ACTIVE' ? 'OCCUPIED' : 'RESERVED',
@@ -154,6 +167,8 @@ export class ResidentsService {
           agreementPeriodMonths: dto.agreementPeriodMonths,
           status: initialStatus,
           monthlyRent: dto.monthlyRent,
+          rentalFrequencyMonths: frequency,
+          skipFirstRent: dto.initialRent === 'SKIP',
           securityDeposit: dto.securityDeposit,
           joiningDate: dto.joiningDate,
           moveInDate:
@@ -178,6 +193,40 @@ export class ResidentsService {
             monthlyRent: dto.monthlyRent,
             startDate: dto.joiningDate,
             reason: 'initial',
+          },
+        });
+      }
+
+      if (dto.initialRent === 'CREATE') {
+        const dueDay = dto.rentDueDay ?? property.rentDueDay;
+        await tx.billingRecord.create({
+          data: {
+            organizationId: orgId,
+            residentId: resident.id,
+            propertyId: dto.propertyId,
+            type: 'RENT',
+            status: 'ISSUED',
+            amount: dto.monthlyRent * frequency,
+            billingMonth,
+            billingYear,
+            dueDate: new Date(
+              Date.UTC(
+                billingYear,
+                billingMonth - 1,
+                Math.max(dueDay, rentStart.getUTCDate()),
+              ),
+            ),
+            periodStart: rentStart,
+            periodEnd: new Date(
+              Date.UTC(billingYear, billingMonth - 1 + frequency, 0),
+            ),
+            description: 'Opening rent',
+            idempotencyKey: [
+              'rent',
+              resident.id,
+              billingYear,
+              billingMonth,
+            ].join('_'),
           },
         });
       }
@@ -445,6 +494,14 @@ export class ResidentsService {
       throw new NotFoundError('Resident', id);
     }
 
+    if (
+      dto.monthlyRent !== undefined &&
+      dto.monthlyRent * resident.rentalFrequencyMonths > 2_147_483_647
+    ) {
+      throw new BadRequestException(
+        'The rent for one billing period is too large',
+      );
+    }
     const updated = await this.prisma.resident.update({
       where: { id },
       data: {
@@ -491,6 +548,11 @@ export class ResidentsService {
     const oldRoomId = resident.roomId;
     const oldBedId = resident.bedId;
     const newRent = dto.newRentAmount ?? resident.monthlyRent;
+    if (newRent * resident.rentalFrequencyMonths > 2_147_483_647) {
+      throw new BadRequestException(
+        'The rent for one billing period is too large',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const room = await tx.room.findFirst({

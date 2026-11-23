@@ -26,10 +26,11 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
       },
       landlordPayoutAccount: {
         findFirst: vi.fn(),
-        create: vi.fn(),
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
         findMany: vi.fn(),
         count: vi.fn(),
       },
+      $transaction: vi.fn((callback) => callback(mockPrisma)),
       auditLog: {
         create: vi.fn().mockResolvedValue({ id: 'audit-1' }),
       },
@@ -39,6 +40,8 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
       createLinkedAccount: vi.fn().mockResolvedValue({
         accountId: 'acc_route_12345',
         status: 'created',
+        productId: 'acc_prd_Test',
+        verified: false,
         email: 'landlord@example.com',
       }),
     };
@@ -47,13 +50,14 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
   });
 
   it('should successfully onboard a landlord and create Razorpay Route sub-merchant account', async () => {
-    mockPrisma.landlordPayoutAccount.findFirst.mockResolvedValue(null);
-    mockPrisma.landlordPayoutAccount.create.mockImplementation(
-      ({ data }: any) => ({
-        id: 'payout-acc-1',
-        ...data,
-      }),
-    );
+    mockPrisma.landlordPayoutAccount.findFirst.mockResolvedValue({
+      id: 'payout-acc-1',
+      razorpayAccountId: 'acc_route_12345',
+      businessName: 'Sharma Properties',
+      accountNumberMasked: '••••••••9012',
+      status: 'PENDING',
+      kycStatus: 'SUBMITTED',
+    });
 
     const result = await service.onboardOwner(
       {
@@ -65,6 +69,7 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
         accountNumber: '123456789012',
         ifscCode: 'HDFC0001234',
         propertyId,
+        routeTermsAccepted: true,
       },
       orgId,
       userId,
@@ -73,15 +78,23 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
     expect(result.accountId).toBe('acc_route_12345');
     expect(result.businessName).toBe('Sharma Properties');
     expect(result.accountNumberMasked).toBe('••••••••9012');
-    expect(result.status).toBe('ACTIVE');
+    expect(result.status).toBe('PENDING');
+    expect(mockPrisma.landlordPayoutAccount.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'PENDING',
+          kycStatus: 'SUBMITTED',
+        }),
+      }),
+    );
     expect(result.alreadyExisted).toBe(false);
 
     expect(mockRazorpayAdapter.createLinkedAccount).toHaveBeenCalledWith({
       email: 'ramesh@example.com',
       phone: '9876543210',
-      legalBusinessName: 'Sharma Properties',
+      legalBusinessName: 'Ramesh Sharma',
       businessType: 'individual',
-      contactName: 'Ramesh Sharma',
+      panNumber: undefined,
       accountNumber: '123456789012',
       ifscCode: 'HDFC0001234',
       beneficiaryName: 'Ramesh Sharma',
@@ -92,6 +105,7 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
   });
 
   it('should return existing account idempotently if already registered', async () => {
+    mockPrisma.landlordPayoutAccount.createMany.mockResolvedValue({ count: 0 });
     mockPrisma.landlordPayoutAccount.findFirst.mockResolvedValue({
       id: 'existing-payout-acc',
       razorpayAccountId: 'acc_route_existing',
@@ -113,6 +127,7 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
         accountNumber: '123456789012',
         ifscCode: 'HDFC0001234',
         propertyId,
+        routeTermsAccepted: true,
       },
       orgId,
       userId,
@@ -120,6 +135,6 @@ describe('PayoutsService (Landlord Onboarding & Route)', () => {
 
     expect(result.alreadyExisted).toBe(true);
     expect(result.accountId).toBe('acc_route_existing');
-    expect(mockRazorpayAdapter.createLinkedAccount).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

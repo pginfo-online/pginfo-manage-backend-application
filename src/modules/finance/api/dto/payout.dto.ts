@@ -41,6 +41,9 @@ export const onboardOwnerSchema = z.object({
     .toUpperCase()
     .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN number')
     .optional(),
+  routeTermsAccepted: z.literal(true, {
+    errorMap: () => ({ message: 'Accept Razorpay Route terms to continue' }),
+  }),
   propertyId: z.string().uuid().optional(),
 });
 

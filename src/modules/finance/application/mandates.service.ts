@@ -1,4 +1,10 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
 import { PayoutsService } from './payouts.service.js';
@@ -8,6 +14,7 @@ import {
   ValidationError,
 } from '../../../common/errors/index.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
+import { dateKeyInTimeZone } from '../../../common/time/property-date.js';
 import { Monetary } from '../domain/monetary.js';
 import { buildAutopayInvite } from '../domain/autopay-invite.js';
 import {
@@ -56,100 +63,180 @@ export class MandatesService {
       );
     }
 
+    if (tenant.rentalFrequencyMonths > 1) {
+      throw new ValidationError(
+        'Autopay currently requires a monthly rental plan',
+      );
+    }
+
+    if (!this.razorpayAdapter.canCreateMoneyLinks()) {
+      throw new ServiceUnavailableException(
+        'Configure Razorpay API credentials and webhook secret to set up Autopay',
+      );
+    }
+
     // Determine unit
     const unitId = dto.unitId ?? tenant.roomId;
     let unitNumber = 'N/A';
     if (unitId) {
       const unit = await this.prisma.room.findFirst({
-        where: { id: unitId, organizationId: orgId },
+        where: {
+          id: unitId,
+          organizationId: orgId,
+          propertyId: tenant.propertyId,
+        },
       });
-      if (unit) {
-        unitNumber = unit.roomNumber;
+      if (!unit || unitId !== tenant.roomId) {
+        throw new ValidationError(
+          'The selected unit must be the tenant’s assigned room',
+        );
       }
+      unitNumber = unit.roomNumber;
     }
 
-    // 2. Check if an active mandate already exists for this tenant & property
-    const existingActiveMandate = await this.prisma.tenantMandate.findFirst({
-      where: {
-        tenantId: tenant.id,
-        propertyId: tenant.propertyId,
-        status: { in: ['ACTIVE', 'CREATED', 'AUTHENTICATED'] },
-      },
-    });
-
-    if (existingActiveMandate) {
-      throw new ConflictError(
-        `An active or pending mandate already exists for this tenant (ID: ${existingActiveMandate.id}, status: ${existingActiveMandate.status})`,
-      );
-    }
-
-    // 3. Find active Landlord Payout Account
     const payoutAccount = await this.payoutsService
       .getActivePayoutAccount(orgId, tenant.propertyId)
-      .catch(() => null);
+      .catch((error: unknown) => {
+        if (!(error instanceof NotFoundError)) throw error;
+        throw new ValidationError(
+          'Add and verify an owner bank account for this property before setting up Autopay',
+        );
+      });
 
-    // 4. Create recurring plan on Razorpay
-    const planName = `Rent - ${tenant.property.name} (Unit ${unitNumber})`;
-    const plan = await this.razorpayAdapter.createPlan({
-      name: planName,
-      amountPaise: dto.rentAmount,
-      currency: 'INR',
-      description:
-        `Monthly rent collection mandate for ${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
-      notes: {
-        tenantId: tenant.id,
-        propertyId: tenant.propertyId,
-        unitId: unitId ?? '',
-        organizationId: orgId,
-      },
-    });
+    const timezone = tenant.property.timezone ?? 'Asia/Kolkata';
+    const today = dateKeyInTimeZone(new Date(), timezone);
+    const joining = tenant.moveInDate ?? tenant.joiningDate;
+    const joiningDay = joining?.toISOString().slice(0, 10) ?? today;
+    const start = joiningDay > today ? joiningDay : today;
+    const [year, month, day] = start.split('-').map(Number) as [
+      number,
+      number,
+      number,
+    ];
+    // Noon UTC falls on the same calendar date in India's supported timezone.
+    const firstCharge = new Date(
+      Date.UTC(
+        year,
+        month - (day < dto.billingDay ? 1 : 0),
+        dto.billingDay,
+        12,
+      ),
+    );
+    let createdSubscriptionId: string | undefined;
+    const { mandate, subscription } = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const [lock] = await tx.$queryRaw<{ acquired: boolean }[]>`
+        SELECT pg_try_advisory_xact_lock(hashtextextended(${'rent-mandate:' + tenant.id}, 0)) AS acquired
+      `;
+          if (!lock?.acquired)
+            throw new ConflictError('Autopay setup is already in progress');
 
-    // 5. Create Subscription with Razorpay (UPI AutoPay & e-Mandate)
-    const subscription = await this.razorpayAdapter.createSubscription({
-      planId: plan.planId,
-      totalCount: dto.tenureMonths,
-      customerNotify: 1,
-      notes: {
-        tenantId: tenant.id,
-        propertyId: tenant.propertyId,
-        unitId: unitId ?? '',
-        organizationId: orgId,
-        billingDay: String(dto.billingDay),
-      },
-    });
+          // 2. Check if an active mandate already exists for this tenant & property
+          const existingActiveMandate = await tx.tenantMandate.findFirst({
+            where: {
+              tenantId: tenant.id,
+              propertyId: tenant.propertyId,
+              status: { in: ['ACTIVE', 'CREATED', 'AUTHENTICATED', 'PENDING'] },
+            },
+          });
 
-    // 6. Save in tenant_mandates table
-    const mandate = await this.prisma.tenantMandate.create({
-      data: {
-        organizationId: orgId,
-        tenantId: tenant.id,
-        propertyId: tenant.propertyId,
-        unitId,
-        bedId: tenant.bedId,
-        landlordPayoutAccountId: payoutAccount?.id,
-        razorpayPlanId: plan.planId,
-        razorpaySubscriptionId: subscription.subscriptionId,
-        shortUrl: subscription.shortUrl,
-        mandateChannel: dto.mandateChannel,
-        status: 'CREATED',
-        collectionMode: 'AUTOPAY',
-        rentAmount: dto.rentAmount,
-        billingDay: dto.billingDay,
-        tenureMonths: dto.tenureMonths,
-        totalCount: dto.tenureMonths,
-        paidCount: 0,
-        metadata: {
-          tenantName: `${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
-          tenantMobile: tenant.mobile,
-          unitNumber,
+          if (existingActiveMandate) {
+            throw new ConflictError(
+              `An active or pending mandate already exists for this tenant (ID: ${existingActiveMandate.id}, status: ${existingActiveMandate.status})`,
+            );
+          }
+
+          // 4. Create recurring plan on Razorpay
+          const planName = `Rent - ${tenant.property.name} (Unit ${unitNumber})`;
+          const plan = await this.razorpayAdapter.createPlan({
+            name: planName,
+            amountPaise: dto.rentAmount,
+            currency: 'INR',
+            description:
+              `Monthly rent collection mandate for ${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
+            notes: {
+              tenantId: tenant.id,
+              propertyId: tenant.propertyId,
+              unitId: unitId ?? '',
+              organizationId: orgId,
+            },
+          });
+
+          // 5. Create Subscription with Razorpay (UPI AutoPay & e-Mandate)
+          const subscription = await this.razorpayAdapter.createSubscription({
+            planId: plan.planId,
+            totalCount: dto.tenureMonths,
+            startAt: Math.floor(firstCharge.getTime() / 1000),
+            customerNotify: dto.sendWhatsAppNotification ? 1 : 0,
+            notes: {
+              tenantId: tenant.id,
+              propertyId: tenant.propertyId,
+              unitId: unitId ?? '',
+              organizationId: orgId,
+              billingDay: String(dto.billingDay),
+            },
+          });
+
+          createdSubscriptionId = subscription.subscriptionId;
+
+          // 6. Save in tenant_mandates table
+          const mandate = await tx.tenantMandate.create({
+            data: {
+              organizationId: orgId,
+              tenantId: tenant.id,
+              propertyId: tenant.propertyId,
+              unitId,
+              bedId: tenant.bedId,
+              landlordPayoutAccountId: payoutAccount.id,
+              razorpayPlanId: plan.planId,
+              razorpaySubscriptionId: subscription.subscriptionId,
+              shortUrl: subscription.shortUrl,
+              mandateChannel: dto.mandateChannel,
+              status: 'CREATED',
+              collectionMode: 'AUTOPAY',
+              rentAmount: dto.rentAmount,
+              billingDay: dto.billingDay,
+              tenureMonths: dto.tenureMonths,
+              totalCount: dto.tenureMonths,
+              nextChargeDate: firstCharge,
+              paidCount: 0,
+              metadata: {
+                tenantName:
+                  `${tenant.firstName} ${tenant.lastName ?? ''}`.trim(),
+                tenantMobile: tenant.mobile,
+                unitNumber,
+              },
+            },
+            include: {
+              tenant: true,
+              property: true,
+              unit: true,
+            },
+          });
+
+          return { mandate, subscription };
         },
-      },
-      include: {
-        tenant: true,
-        property: true,
-        unit: true,
-      },
-    });
+        { timeout: 35_000 },
+      )
+      .catch(async (error: unknown) => {
+        if (createdSubscriptionId) {
+          try {
+            const saved = await this.prisma.tenantMandate.findUnique({
+              where: { razorpaySubscriptionId: createdSubscriptionId },
+            });
+            if (!saved)
+              await this.razorpayAdapter.cancelSubscription(
+                createdSubscriptionId,
+              );
+          } catch {
+            this.logger.error(
+              `Unable to reconcile unconfirmed subscription ${createdSubscriptionId}`,
+            );
+          }
+        }
+        throw error;
+      });
 
     const rentRupees = Monetary.toRupees(dto.rentAmount);
     const whatsappPayload = buildAutopayInvite(
@@ -160,7 +247,7 @@ export class MandatesService {
       subscription.shortUrl,
     );
     const { notificationSent, notificationError, notificationMessageId } =
-      dto.sendWhatsAppNotification
+      dto.sendWhatsAppNotification && tenant.sendWhatsappReminder !== false
         ? await this.sendInvite(whatsappPayload)
         : {
             notificationSent: false,
@@ -196,6 +283,7 @@ export class MandatesService {
       rentAmountRupees: rentRupees,
       billingDay: dto.billingDay,
       tenureMonths: dto.tenureMonths,
+      nextChargeDate: firstCharge,
       whatsappPayload,
       notificationSent,
       notificationError,
@@ -212,6 +300,7 @@ export class MandatesService {
             firstName: true,
             mobile: true,
             whatsappNumber: true,
+            sendWhatsappReminder: true,
             status: true,
             propertyId: true,
           },
@@ -240,7 +329,14 @@ export class MandatesService {
       mandate.billingDay,
       mandate.shortUrl,
     );
-    const result = await this.sendInvite(payload);
+    const result =
+      mandate.tenant.sendWhatsappReminder === false
+        ? {
+            notificationSent: false,
+            notificationError: 'This tenant has disabled WhatsApp reminders',
+            notificationMessageId: null,
+          }
+        : await this.sendInvite(payload);
     await this.prisma.auditLog.create({
       data: {
         organizationId: orgId,
@@ -350,7 +446,7 @@ export class MandatesService {
       this.prisma.tenantMandate.count({ where }),
     ]);
 
-    return buildOffsetResponse(mandates, total, query.limit, offset);
+    return buildOffsetResponse(mandates, total, query.page, query.limit);
   }
 
   /**

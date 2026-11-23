@@ -69,6 +69,15 @@ export class AnnouncementsController {
     return this.announcementsService.findAll(orgId, query);
   }
 
+  @Get('reminders/whatsapp/:residentId')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER')
+  async whatsappReminderHistory(
+    @Param('residentId', ParseUUIDPipe) residentId: string,
+    @CurrentOrgId() orgId: string,
+  ) {
+    return this.announcementsService.whatsappReminderHistory(orgId, residentId);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get details of an announcement' })
   @ApiResponse({ status: 200, description: 'Announcement details' })

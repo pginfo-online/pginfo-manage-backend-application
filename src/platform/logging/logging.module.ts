@@ -45,7 +45,10 @@ import type { IncomingMessage } from 'http';
           req: (req: Record<string, unknown>) => ({
             id: req['id'],
             method: req['method'],
-            url: req['url'],
+            url:
+              typeof req['url'] === 'string'
+                ? req['url'].split('?')[0]
+                : undefined,
             remoteAddress: req['remoteAddress'],
           }),
           res: (res: Record<string, unknown>) => ({

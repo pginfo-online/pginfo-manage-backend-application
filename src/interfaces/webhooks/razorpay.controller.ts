@@ -33,19 +33,19 @@ export class RazorpayWebhookController {
   async handleWebhook(
     @Headers('x-razorpay-signature') signature: string,
     @Req() req: Request,
+    @Headers('x-razorpay-event-id') eventId?: string,
   ) {
     if (!signature) {
       throw new BadRequestException('Missing x-razorpay-signature header');
     }
 
-    // Prefer raw unparsed bytes from NestJS rawBody for strict cryptographic verification
-    const rawBodyBuffer = (req as unknown as { rawBody?: Buffer }).rawBody;
-    const rawBody = rawBodyBuffer
-      ? rawBodyBuffer.toString('utf8')
-      : typeof req.body === 'string'
-        ? req.body
-        : JSON.stringify(req.body);
+    const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+    if (!rawBody) throw new BadRequestException('Missing raw webhook body');
 
-    return this.razorpayWebhookService.handleWebhook(rawBody, signature);
+    return this.razorpayWebhookService.handleWebhook(
+      rawBody.toString('utf8'),
+      signature,
+      eventId,
+    );
   }
 }

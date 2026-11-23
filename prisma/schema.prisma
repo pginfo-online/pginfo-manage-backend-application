@@ -470,6 +470,8 @@ model Resident {
   noticePeriodDays      Int?           @map("notice_period_days")
   agreementPeriodMonths Int?           @map("agreement_period_months")
   monthlyRent           Int            @map("monthly_rent") // paise
+  rentalFrequencyMonths Int @default(1) @map("rental_frequency_months")
+  skipFirstRent Boolean @default(false) @map("skip_first_rent")
   securityDeposit       Int            @default(0) @map("security_deposit") // paise
   joiningDate           DateTime       @map("joining_date") @db.Date
   moveInDate            DateTime?      @map("move_in_date") @db.Date
@@ -1352,4 +1354,13 @@ model WebhookEvent {
   @@index([eventType])
   @@index([processedAt])
   @@map("webhook_events")
+}
+
+model WhatsAppDelivery {
+  messageId   String   @id @map("message_id") @db.VarChar(255)
+  status      String   @db.VarChar(16)
+  statusAt    DateTime @map("status_at") @db.Timestamptz(3)
+  failureCode Int?     @map("failure_code")
+
+  @@map("whatsapp_deliveries")
 }

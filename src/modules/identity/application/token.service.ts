@@ -92,6 +92,7 @@ export class TokenService {
     rawToken: string,
     userAgent?: string,
     ipAddress?: string,
+    organizationId?: string,
   ): Promise<{ tokenPair: TokenPair; userId: string }> {
     const tokenHash = this.hashToken(rawToken);
 
@@ -101,7 +102,10 @@ export class TokenService {
         user: {
           include: {
             memberships: {
-              where: { isActive: true },
+              where: {
+                isActive: true,
+                ...(organizationId ? { organizationId } : {}),
+              },
               take: 1,
             },
           },
@@ -138,6 +142,13 @@ export class TokenService {
       throw new UnauthorizedError('User account is deactivated');
     }
 
+    const primaryMembership = existingToken.user.memberships[0];
+    if (organizationId && !primaryMembership) {
+      throw new UnauthorizedError(
+        'The selected organization is no longer available',
+      );
+    }
+
     // Create successor token in same family
     const nextToken = await this.generateRefreshToken(
       existingToken.userId,
@@ -155,8 +166,6 @@ export class TokenService {
       },
     });
 
-    // Default active org is first membership if any
-    const primaryMembership = existingToken.user.memberships[0];
     const accessToken = await this.generateAccessToken({
       id: existingToken.user.id,
       email: existingToken.user.email,

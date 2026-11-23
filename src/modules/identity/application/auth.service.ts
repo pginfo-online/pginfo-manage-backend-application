@@ -266,12 +266,13 @@ export class AuthService {
    */
   async refresh(
     rawToken: string,
-    meta?: { ipAddress?: string; userAgent?: string },
+    meta?: { ipAddress?: string; userAgent?: string; organizationId?: string },
   ): Promise<{ tokens: TokenPair }> {
     const { tokenPair } = await this.tokenService.rotateRefreshToken(
       rawToken,
       meta?.userAgent,
       meta?.ipAddress,
+      meta?.organizationId,
     );
     return { tokens: tokenPair };
   }

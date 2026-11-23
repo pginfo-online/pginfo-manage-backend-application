@@ -58,6 +58,13 @@ export const envSchema = z.object({
   // ── WhatsApp ─────────────────────────────────────────────────
   WHATSAPP_API_URL: z.string().optional().default(''),
   WHATSAPP_API_KEY: z.string().optional().default(''),
+  META_WHATSAPP_VERIFY_TOKEN: z.string().trim().default(''),
+  META_WHATSAPP_APP_SECRET: z.string().trim().default(''),
+  META_WHATSAPP_RENT_REMINDER_TEMPLATE: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9_]*$/)
+    .default(''),
   META_WHATSAPP_ACCESS_TOKEN: z.string().trim().default(''),
   META_WHATSAPP_PHONE_NUMBER_ID: z.string().trim().regex(/^\d*$/).default(''),
   META_WHATSAPP_API_VERSION: z
@@ -76,7 +83,7 @@ export const envSchema = z.object({
   CORS_ORIGINS: z
     .string()
     .default(
-      'http://localhost:3000,http://localhost:5000,http://localhost:5173',
+      'http://localhost:3000,http://localhost:3001,http://localhost:5000,http://localhost:5173',
     )
     .transform((v) => v.split(',')),
 

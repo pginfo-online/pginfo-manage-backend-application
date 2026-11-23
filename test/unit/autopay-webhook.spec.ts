@@ -8,6 +8,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
   let mockConfig: any;
   let mockWhatsAppAdapter: any;
   let mockEmailAdapter: any;
+  let mockMoneyLinks: any;
 
   const orgId = '00000000-0000-0000-0000-000000000001';
   const tenantId = '00000000-0000-0000-0000-000000000010';
@@ -44,6 +45,9 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
           unit: { roomNumber: '101' },
           landlordPayoutAccount: {
             razorpayAccountId: landlordAccountId,
+            status: 'ACTIVE',
+            kycStatus: 'VERIFIED',
+            metadata: { routeProductId: 'acc_prd_123' },
             phone: '9123456789',
             beneficiaryName: 'Mr. Landlord',
           },
@@ -51,6 +55,8 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         update: vi.fn().mockResolvedValue({ id: mandateId, status: 'ACTIVE' }),
       },
       rentInvoice: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn().mockResolvedValue({
           id: 'inv-1',
           status: 'PAID',
@@ -63,11 +69,13 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         update: vi.fn(),
       },
       payment: {
+        findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({ id: 'pay-db-1' }),
       },
       auditLog: {
         create: vi.fn().mockResolvedValue({ id: 'audit-1' }),
       },
+      $queryRaw: vi.fn(),
       $transaction: vi.fn().mockImplementation(async (callback: any) => {
         return callback(mockPrisma);
       }),
@@ -81,10 +89,11 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         amount: 2497000, // ₹24,970 (₹25,000 - ₹30 fee)
         status: 'processed',
       }),
-      createPaymentLink: vi.fn().mockResolvedValue({
-        paymentLinkId: 'plink_fallback_888',
-        shortUrl: 'https://rzp.io/i/fallback_instant',
-        status: 'created',
+    };
+
+    mockMoneyLinks = {
+      create: vi.fn().mockResolvedValue({
+        paymentLink: 'https://rzp.io/i/fallback_instant',
       }),
     };
 
@@ -109,6 +118,8 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       mockConfig as any,
       mockWhatsAppAdapter as any,
       mockEmailAdapter as any,
+      undefined,
+      mockMoneyLinks,
     );
   });
 
@@ -183,6 +194,13 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
   });
 
   it('should handle subscription.charged: route transfer (amount - platform_fee) to landlord & mark invoice PAID', async () => {
+    mockPrisma.billingRecord.findFirst.mockResolvedValue({
+      id: 'bill-1',
+      amount: 2500000,
+      paidAmount: 0,
+      status: 'ISSUED',
+      version: 1,
+    });
     const rawPayload = JSON.stringify({
       id: 'evt_charge_1',
       event: 'subscription.charged',
@@ -236,6 +254,59 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     expect(mockWhatsAppAdapter.send).toHaveBeenCalled();
   });
 
+  it('does not transfer a capture when the rent due was already paid by another method', async () => {
+    mockPrisma.billingRecord.findFirst.mockResolvedValue({
+      id: 'bill-1',
+      amount: 2500000,
+      paidAmount: 2500000,
+      status: 'PAID',
+      version: 2,
+    });
+    await service.handleWebhook(
+      JSON.stringify({
+        id: 'evt_charge_overpaid',
+        event: 'subscription.charged',
+        payload: {
+          payment: {
+            entity: {
+              id: 'pay_overpaid',
+              subscription_id: 'sub_test_123',
+              amount: 2500000,
+            },
+          },
+        },
+      }),
+      'valid_sig',
+    );
+    expect(mockPrisma.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'DISPUTED' }),
+      }),
+    );
+    expect(mockRazorpayAdapter.transferPayment).not.toHaveBeenCalled();
+  });
+
+  it('does not settle or transfer a gateway payment twice across webhook types', async () => {
+    mockPrisma.payment.findUnique.mockResolvedValue({ id: 'existing-payment' });
+    const raw = JSON.stringify({
+      id: 'evt_capture_second_type',
+      event: 'payment.captured',
+      payload: {
+        payment: {
+          entity: {
+            id: 'pay_replayed',
+            subscription_id: 'sub_test_123',
+            amount: 2500000,
+          },
+        },
+      },
+    });
+    await service.handleWebhook(raw, 'valid_sig');
+    expect(mockPrisma.rentInvoice.upsert).not.toHaveBeenCalled();
+    expect(mockPrisma.payment.create).not.toHaveBeenCalled();
+    expect(mockRazorpayAdapter.transferPayment).not.toHaveBeenCalled();
+  });
+
   it('should handle payment.failed: mark invoice FAILED & send one-time fallback payment link', async () => {
     const rawPayload = JSON.stringify({
       id: 'evt_fail_1',
@@ -253,16 +324,14 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       },
     });
 
+    mockPrisma.rentInvoice.upsert.mockResolvedValue({
+      id: 'inv-1',
+      status: 'FAILED',
+    });
     const result = await service.handleWebhook(rawPayload, 'valid_sig');
     expect(result.received).toBe(true);
 
-    // Verify fallback payment link creation
-    expect(mockRazorpayAdapter.createPaymentLink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amountPaise: 2500000,
-        description: expect.stringContaining('Fallback Rent Payment'),
-      }),
-    );
+    expect(mockMoneyLinks.create).toHaveBeenCalledWith(tenantId, orgId);
 
     // Verify invoice updated with status FAILED and retryCount
     expect(mockPrisma.rentInvoice.upsert).toHaveBeenCalledWith(
@@ -270,7 +339,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         create: expect.objectContaining({
           status: 'FAILED',
           collectionType: 'FALLBACK_LINK',
-          retryCount: 1,
+          retryCount: 0,
           failureReason: 'Insufficient funds in customer bank account',
           fallbackPaymentUrl: 'https://rzp.io/i/fallback_instant',
         }),

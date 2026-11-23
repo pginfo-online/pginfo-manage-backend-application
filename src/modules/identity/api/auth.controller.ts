@@ -79,6 +79,7 @@ export class AuthController {
     return this.authService.refresh(dto.refreshToken, {
       ipAddress: req.ip,
       userAgent: req.headers['user-agent'],
+      organizationId: dto.organizationId,
     });
   }
 

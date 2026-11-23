@@ -37,6 +37,7 @@ export const loginSchema = z.object({
 export type LoginDto = z.infer<typeof loginSchema>;
 
 export const refreshTokenSchema = z.object({
+  organizationId: z.string().uuid().optional(),
   refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { WhatsAppWebhookController } from './api/whatsapp-webhook.controller.js';
 import { AnnouncementsController } from './api/announcements.controller.js';
 import { AnnouncementsService } from './application/announcements.service.js';
 import {
@@ -9,7 +10,7 @@ import { ResendEmailAdapter } from './infrastructure/email.adapter.js';
 import { WhatsAppHttpAdapter } from './infrastructure/whatsapp.adapter.js';
 
 @Module({
-  controllers: [AnnouncementsController],
+  controllers: [AnnouncementsController, WhatsAppWebhookController],
   providers: [
     AnnouncementsService,
     {

@@ -1,4 +1,7 @@
 import {
+  BadRequestException,
+  BadGatewayException,
+  ConflictException,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -19,7 +22,7 @@ export interface CreateLinkedAccountOptions {
   phone: string;
   legalBusinessName: string;
   businessType: string;
-  contactName: string;
+  panNumber?: string;
   accountNumber: string;
   ifscCode: string;
   beneficiaryName: string;
@@ -30,6 +33,21 @@ export interface LinkedAccountResult {
   accountId: string;
   status: string;
   email: string;
+  productId?: string;
+  verified: boolean;
+}
+
+interface RouteProduct {
+  id?: string;
+  activation_status?: string;
+  active_configuration?: {
+    settlement_accounts?: {
+      method?: string;
+      active?: boolean;
+      verification_status?: string;
+      bank_account?: { is_default?: boolean };
+    }[];
+  };
 }
 
 export interface CreatePlanOptions {
@@ -293,78 +311,230 @@ export class RazorpayAdapter {
   async createLinkedAccount(
     options: CreateLinkedAccountOptions,
   ): Promise<LinkedAccountResult> {
-    if (this.isLiveOrConfigured()) {
-      try {
-        const payload = {
-          email: options.email,
-          phone: options.phone,
-          type: 'route',
-          legal_business_name: options.legalBusinessName,
-          business_type: options.businessType || 'individual',
-          contact_name: options.contactName,
-          profile: {
-            category: 'housing',
-            subcategory: 'real_estate_agents',
-            addresses: {
-              registered: {
-                street1: 'Rental Property Address',
-                city: 'Bengaluru',
-                state: 'KA',
-                postal_code: '560001',
-                country: 'IN',
-              },
-            },
-          },
-          notes: options.notes,
-        };
-
-        const response = await fetch('https://api.razorpay.com/v1/accounts', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Basic ${this.getBasicAuthHeader()}`,
-          },
-          body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          this.logger.error(
-            `Razorpay linked account creation failed: ${JSON.stringify(errorData)}`,
-          );
-          throw new Error(
-            `Razorpay Route Account error: ${JSON.stringify(errorData)}`,
-          );
-        }
-
-        const data = (await response.json()) as {
-          id: string;
-          status: string;
-          email: string;
-        };
-
-        return {
-          accountId: data.id,
-          status: data.status || 'created',
-          email: data.email,
-        };
-      } catch (err) {
-        this.logger.error(
-          `Failed to create Razorpay linked account: ${(err as Error).message}`,
-        );
-        throw err;
-      }
-    }
-
-    // Dev/Sandbox simulation
-    const simAccountId = `acc_sim_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    this.logger.log(
-      `[SIMULATION] Created linked sub-merchant account: ${simAccountId} for ${options.legalBusinessName}`,
-    );
-    return {
-      accountId: simAccountId,
-      status: 'created',
+    const payload = {
+      type: 'route',
+      tnc_accepted: true,
       email: options.email,
+      phone: '+91' + options.phone.slice(-10),
+      legal_business_name: options.legalBusinessName,
+      business_type: options.businessType,
+      ...(options.panNumber ? { legal_info: { pan: options.panNumber } } : {}),
+      notes: options.notes,
+      settlement_accounts: [
+        {
+          method: 'bank_account',
+          bank_account: {
+            account_number: options.accountNumber,
+            beneficiary_name: options.beneficiaryName,
+            code_type: 'ifsc',
+            code: options.ifscCode,
+            currency: 'INR',
+            is_default: true,
+          },
+        },
+      ],
+    };
+    const key = createHmac('sha256', this.getKeySecret())
+      .update(JSON.stringify(payload))
+      .digest('hex')
+      .slice(0, 32);
+    const idempotencyKey = [
+      key.slice(0, 8),
+      key.slice(8, 12),
+      key.slice(12, 16),
+      key.slice(16, 20),
+      key.slice(20),
+    ].join('-');
+    const body = JSON.stringify({ ...payload, reference_id: 'pginfo_' + key });
+    const data = await this.routeRequest(
+      '/v2/accounts',
+      'POST',
+      body,
+      idempotencyKey,
+    );
+    if (!data.id || !/^acc_[A-Za-z0-9]+$/.test(data.id))
+      throw new BadGatewayException(
+        'Razorpay did not return a linked account ID',
+      );
+    return {
+      accountId: data.id,
+      status: data.status ?? 'created',
+      email: options.email,
+      productId: data.product_config?.id,
+      verified: this.isRouteBankVerified(data.product_config),
+    };
+  }
+
+  async fetchRouteBankVerification(accountId: string, productId: string) {
+    if (
+      !/^acc_[A-Za-z0-9]+$/.test(accountId) ||
+      !/^acc_prd_[A-Za-z0-9]+$/.test(productId)
+    )
+      throw new BadRequestException(
+        'This account needs Route setup before verification can be checked',
+      );
+    const product = await this.routeRequest(
+      `/v2/accounts/${accountId}/products/${productId}`,
+      'GET',
+    );
+    return this.isRouteBankVerified(product);
+  }
+
+  private isRouteBankVerified(product?: RouteProduct) {
+    return (
+      product?.activation_status === 'activated' &&
+      product.active_configuration?.settlement_accounts?.some(
+        (account) =>
+          account.method === 'bank_account' &&
+          account.active === true &&
+          account.bank_account?.is_default === true &&
+          account.verification_status === 'verified',
+      ) === true
+    );
+  }
+
+  private async routeRequest(
+    path: string,
+    method: 'POST' | 'GET',
+    body?: string,
+    key?: string,
+  ) {
+    if (!this.isLiveOrConfigured()) {
+      throw new ServiceUnavailableException(
+        'Razorpay Route credentials are required to manage settlement accounts',
+      );
+    }
+    let response: Response;
+    try {
+      response = await fetch('https://api.razorpay.com' + path, {
+        method,
+        body,
+        signal: AbortSignal.timeout(12_000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${this.getBasicAuthHeader()}`,
+          ...(key ? { 'Idempotency-Key': key } : {}),
+        },
+      });
+    } catch {
+      throw new ServiceUnavailableException(
+        'Razorpay Route did not respond. Retry with the same details.',
+      );
+    }
+    if (response.status === 401 || response.status === 403)
+      throw new ServiceUnavailableException(
+        'Check Razorpay API credentials and confirm Route is enabled.',
+      );
+    if ([400, 409, 422].includes(response.status)) {
+      const result = (await response.json().catch(() => null)) as {
+        error?: { field?: unknown; reason?: unknown; description?: unknown };
+      } | null;
+      const field = result?.error?.field;
+      const messages = new Map([
+        [
+          'reference_id',
+          'Razorpay rejected the onboarding reference. Contact support before retrying.',
+        ],
+        [
+          'legal_business_name',
+          'Enter the legal name exactly as it appears on the owner’s KYC documents.',
+        ],
+        ['legal_info.pan', 'Check the PAN against the owner’s KYC documents.'],
+        [
+          'email',
+          'Check whether the email is valid or already registered in Razorpay Route.',
+        ],
+        ['phone', 'Check the owner’s Indian mobile number.'],
+        [
+          'settlement_accounts[0].bank_account.account_number',
+          'Check the bank account number.',
+        ],
+        [
+          'settlement_accounts[0].bank_account.beneficiary_name',
+          'Enter the beneficiary name exactly as shown in the bank records.',
+        ],
+        [
+          'settlement_accounts[0].bank_account.code',
+          'Check the bank’s IFSC code.',
+        ],
+      ]);
+      if (response.status === 409)
+        throw new ConflictException(
+          'Razorpay already has a conflicting linked account or the same request is in progress. Check Route before trying again.',
+        );
+      const details = [result?.error?.reason, result?.error?.description]
+        .filter((value): value is string => typeof value === 'string')
+        .join(' ')
+        .toLowerCase()
+        .replaceAll('_', ' ');
+      const categories = [
+        [
+          /route.{0,48}(not enabled|not activated|not supported|not available|not allowed)/,
+          'route_disabled',
+          'Razorpay reports that Route onboarding is unavailable for this merchant. Check the Route setup in the Razorpay Dashboard.',
+        ],
+        [
+          /(already (exists|registered|linked|associated)|duplicate)/,
+          'duplicate_account',
+          'Razorpay reports that these details are already registered. Check existing linked accounts in Razorpay Route.',
+        ],
+        [
+          /(beneficiary|name mismatch|name does not match)/,
+          'beneficiary',
+          'Enter the beneficiary name exactly as shown in the bank records.',
+        ],
+        [
+          /\bifsc\b/,
+          'ifsc',
+          'Razorpay rejected the IFSC. Check it against the bank records.',
+        ],
+        [
+          /bank account|account number/,
+          'bank_account',
+          'Razorpay rejected the bank account details. Check the account number and IFSC against the bank records.',
+        ],
+        [
+          /\bpan\b|legal info/,
+          'pan',
+          'Check whether Razorpay requires PAN or other KYC information for this account.',
+        ],
+        [
+          /reference id/,
+          'reference',
+          'Razorpay rejected the onboarding reference. Contact support before retrying.',
+        ],
+      ] as const;
+      const matched = categories.find(([pattern]) => pattern.test(details));
+      const fieldMessage =
+        typeof field === 'string'
+          ? messages.get(field.replace(/\[\d*\]/g, '[0]'))
+          : undefined;
+      this.logger.warn(
+        {
+          upstreamStatus: response.status,
+          category:
+            matched?.[1] ?? (fieldMessage ? 'known_field' : 'unclassified'),
+        },
+        'Razorpay Route onboarding rejected',
+      );
+      throw new BadRequestException(
+        fieldMessage ??
+          matched?.[2] ??
+          'Razorpay rejected the account without a recognized field or reason. Check the failed request in Razorpay or contact Razorpay support.',
+      );
+    }
+    if (!response.ok)
+      throw new BadGatewayException(
+        'Razorpay Route could not complete the request. Retry with the same details.',
+      );
+    return (await response.json().catch(() => {
+      throw new BadGatewayException(
+        'Razorpay Route returned an invalid response',
+      );
+    })) as RouteProduct & {
+      id?: string;
+      status?: string;
+      product_config?: RouteProduct;
     };
   }
 
@@ -376,6 +546,7 @@ export class RazorpayAdapter {
       try {
         const response = await fetch('https://api.razorpay.com/v1/plans', {
           method: 'POST',
+          signal: AbortSignal.timeout(12000),
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Basic ${this.getBasicAuthHeader()}`,
@@ -441,6 +612,7 @@ export class RazorpayAdapter {
           'https://api.razorpay.com/v1/subscriptions',
           {
             method: 'POST',
+            signal: AbortSignal.timeout(12000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Basic ${this.getBasicAuthHeader()}`,
@@ -512,6 +684,7 @@ export class RazorpayAdapter {
           `https://api.razorpay.com/v1/subscriptions/${subscriptionId}/cancel`,
           {
             method: 'POST',
+            signal: AbortSignal.timeout(12000),
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Basic ${this.getBasicAuthHeader()}`,
@@ -552,74 +725,72 @@ export class RazorpayAdapter {
     paymentId: string,
     item: RouteTransferItem,
   ): Promise<RouteTransferResult> {
-    if (this.isLiveOrConfigured()) {
-      try {
-        const response = await fetch(
-          `https://api.razorpay.com/v1/payments/${paymentId}/transfers`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Basic ${this.getBasicAuthHeader()}`,
+    if (!this.isLiveOrConfigured())
+      throw new ServiceUnavailableException(
+        'Razorpay Route credentials are required for owner transfers',
+      );
+    if (
+      !/^pay_[A-Za-z0-9]+$/.test(paymentId) ||
+      !/^acc_[A-Za-z0-9]+$/.test(item.account)
+    )
+      throw new BadRequestException(
+        'Invalid Razorpay payment or linked account',
+      );
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${paymentId}/transfers`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(12_000),
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${this.getBasicAuthHeader()}`,
+        },
+        body: JSON.stringify({
+          transfers: [
+            {
+              account: item.account,
+              amount: item.amount,
+              currency: item.currency || 'INR',
+              notes: item.notes,
+              on_hold: item.onHold ?? 0,
             },
-            body: JSON.stringify({
-              transfers: [
-                {
-                  account: item.account,
-                  amount: item.amount,
-                  currency: item.currency || 'INR',
-                  notes: item.notes,
-                  on_hold: item.onHold ?? 0,
-                },
-              ],
-            }),
-          },
-        );
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          this.logger.error(
-            `Razorpay Route transfer failed: ${JSON.stringify(errorData)}`,
-          );
-          throw new Error(
-            `Razorpay Route transfer error: ${JSON.stringify(errorData)}`,
-          );
-        }
-
-        const data = (await response.json()) as {
-          items: Array<{
-            id: string;
-            recipient: string;
-            amount: number;
-            status: string;
-          }>;
-        };
-
-        const firstItem = data.items?.[0];
-        return {
-          transferId: firstItem?.id || `trf_${Date.now()}`,
-          accountId: firstItem?.recipient || item.account,
-          amount: firstItem?.amount || item.amount,
-          status: firstItem?.status || 'processed',
-        };
-      } catch (err) {
-        this.logger.error(
-          `Failed to execute Route transfer for payment ${paymentId}: ${(err as Error).message}`,
-        );
-        throw err;
-      }
-    }
-
-    // Dev/Sandbox simulation
-    const simTransferId = `trf_sim_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    this.logger.log(
-      `[SIMULATION] Executed Route transfer: ${simTransferId} routing ${item.amount} paise to ${item.account}`,
+          ],
+        }),
+      },
     );
+    if (!response.ok)
+      throw new BadGatewayException(
+        `Razorpay Route transfer returned HTTP ${response.status}`,
+      );
+    const data = (await response.json()) as {
+      items?: {
+        id?: string;
+        recipient?: string;
+        amount?: number;
+        status?: string;
+        transfer_status?: string;
+      }[];
+    };
+    const transfer = data?.items?.[0];
+    if (
+      !transfer?.id ||
+      !/^trf_[A-Za-z0-9]+$/.test(transfer.id) ||
+      transfer.recipient !== item.account ||
+      transfer.amount !== item.amount
+    )
+      throw new BadGatewayException(
+        'Razorpay did not confirm the expected Route transfer',
+      );
+    const status = transfer.transfer_status ?? transfer.status ?? 'unknown';
+    if (['failed', 'reversed'].includes(status))
+      throw new BadGatewayException(
+        'Razorpay reported an unsuccessful Route transfer',
+      );
     return {
-      transferId: simTransferId,
-      accountId: item.account,
-      amount: item.amount,
-      status: 'processed',
+      transferId: transfer.id,
+      accountId: transfer.recipient,
+      amount: transfer.amount,
+      status,
     };
   }
 

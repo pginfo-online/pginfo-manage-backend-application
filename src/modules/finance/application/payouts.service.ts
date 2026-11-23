@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
 import { NotFoundError } from '../../../common/errors/index.js';
@@ -10,8 +10,6 @@ import type {
 
 @Injectable()
 export class PayoutsService {
-  private readonly logger = new Logger(PayoutsService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly razorpayAdapter: RazorpayAdapter,
@@ -50,93 +48,69 @@ export class PayoutsService {
       }
     }
 
-    // 3. Check for existing active account for this owner & org
     const maskedAcc = this.maskAccountNumber(dto.accountNumber);
-    const existing = await this.prisma.landlordPayoutAccount.findFirst({
-      where: {
-        organizationId: orgId,
-        userId,
-        accountNumberMasked: maskedAcc,
-        ifscCode: dto.ifscCode,
-        status: { in: ['ACTIVE', 'PENDING'] },
-      },
-    });
-
-    if (existing) {
-      this.logger.log(
-        `Returning existing active linked payout account for user ${userId}: ${existing.razorpayAccountId}`,
-      );
-      return {
-        id: existing.id,
-        accountId: existing.razorpayAccountId,
-        businessName: existing.businessName,
-        beneficiaryName: existing.beneficiaryName,
-        accountNumberMasked: existing.accountNumberMasked,
-        ifscCode: existing.ifscCode,
-        status: existing.status,
-        kycStatus: existing.kycStatus,
-        alreadyExisted: true,
-      };
-    }
 
     // 4. Create linked account with Razorpay Route
     const routeAccount = await this.razorpayAdapter.createLinkedAccount({
       email: dto.email,
       phone: dto.phone,
-      legalBusinessName: dto.businessName,
+      legalBusinessName:
+        dto.businessType === 'individual' ? dto.ownerName : dto.businessName,
       businessType: dto.businessType,
-      contactName: dto.ownerName,
+      panNumber: dto.panNumber,
       accountNumber: dto.accountNumber,
       ifscCode: dto.ifscCode,
       beneficiaryName: dto.ownerName,
       notes: {
         organizationId: orgId,
-        userId,
         propertyId: dto.propertyId || '',
       },
     });
 
-    // 5. Persist the payout account record in database
-    const payoutAccount = await this.prisma.landlordPayoutAccount.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        propertyId: dto.propertyId,
-        razorpayAccountId: routeAccount.accountId,
-        businessName: dto.businessName,
-        businessType: dto.businessType,
-        accountNumberMasked: maskedAcc,
-        ifscCode: dto.ifscCode,
-        beneficiaryName: dto.ownerName,
-        email: dto.email,
-        phone: dto.phone,
-        status: 'ACTIVE',
-        kycStatus: 'VERIFIED',
-        metadata: {
-          rawStatus: routeAccount.status,
-          onboardedAt: new Date().toISOString(),
-          ...(dto.panNumber
-            ? { panMasked: `*****${dto.panNumber.slice(-4)}` }
-            : {}),
-        },
+    const { payoutAccount, alreadyExisted } = await this.prisma.$transaction(
+      async (tx) => {
+        const inserted = await tx.landlordPayoutAccount.createMany({
+          skipDuplicates: true,
+          data: {
+            organizationId: orgId,
+            userId,
+            propertyId: dto.propertyId,
+            razorpayAccountId: routeAccount.accountId,
+            businessName: dto.businessName,
+            businessType: dto.businessType,
+            accountNumberMasked: maskedAcc,
+            ifscCode: dto.ifscCode,
+            beneficiaryName: dto.ownerName,
+            email: dto.email,
+            phone: dto.phone,
+            status: routeAccount.verified ? 'ACTIVE' : 'PENDING',
+            kycStatus: routeAccount.verified ? 'VERIFIED' : 'SUBMITTED',
+            metadata: { routeProductId: routeAccount.productId ?? null },
+          },
+        });
+        const payoutAccount = await tx.landlordPayoutAccount.findFirst({
+          where: {
+            organizationId: orgId,
+            razorpayAccountId: routeAccount.accountId,
+          },
+        });
+        if (!payoutAccount)
+          throw new ConflictException(
+            'Razorpay returned an account already registered elsewhere',
+          );
+        if (inserted.count)
+          await tx.auditLog.create({
+            data: {
+              organizationId: orgId,
+              userId,
+              action: 'payouts.onboard_owner',
+              entityType: 'LandlordPayoutAccount',
+              entityId: payoutAccount.id,
+            },
+          });
+        return { payoutAccount, alreadyExisted: inserted.count === 0 };
       },
-    });
-
-    // 6. Audit Log
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'payouts.onboard_owner',
-        entityType: 'LandlordPayoutAccount',
-        entityId: payoutAccount.id,
-        metadata: {
-          accountId: routeAccount.accountId,
-          businessName: dto.businessName,
-          propertyId: dto.propertyId,
-        },
-      },
-    });
+    );
 
     return {
       id: payoutAccount.id,
@@ -147,8 +121,45 @@ export class PayoutsService {
       ifscCode: payoutAccount.ifscCode,
       status: payoutAccount.status,
       kycStatus: payoutAccount.kycStatus,
-      alreadyExisted: false,
+      alreadyExisted,
     };
+  }
+
+  async refreshVerification(id: string, orgId: string) {
+    const account = await this.prisma.landlordPayoutAccount.findFirst({
+      where: { id, organizationId: orgId },
+    });
+    if (!account) throw new NotFoundError('Bank account', id);
+    const metadata = account.metadata;
+    const productId =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? metadata.routeProductId
+        : null;
+    if (typeof productId !== 'string')
+      throw new ConflictException(
+        'This legacy bank entry needs onboarding through Razorpay Route',
+      );
+    const verified = await this.razorpayAdapter.fetchRouteBankVerification(
+      account.razorpayAccountId,
+      productId,
+    );
+    const updated = await this.prisma.landlordPayoutAccount.updateMany({
+      where: {
+        id,
+        organizationId: orgId,
+        updatedAt: account.updatedAt,
+        status: { in: ['PENDING', 'ACTIVE'] },
+      },
+      data: {
+        status: verified ? 'ACTIVE' : 'PENDING',
+        kycStatus: verified ? 'VERIFIED' : 'SUBMITTED',
+      },
+    });
+    if (!updated.count)
+      throw new ConflictException(
+        'Bank account changed. Reload before checking again.',
+      );
+    return { verified };
   }
 
   /**
@@ -159,6 +170,16 @@ export class PayoutsService {
       where: {
         organizationId: orgId,
         status: 'ACTIVE',
+        kycStatus: 'VERIFIED',
+        razorpayAccountId: { not: { startsWith: 'acc_sim_' } },
+        AND: [
+          {
+            metadata: {
+              path: ['routeProductId'],
+              string_starts_with: 'acc_prd_',
+            },
+          },
+        ],
         ...(propertyId ? { OR: [{ propertyId }, { propertyId: null }] } : {}),
       },
       orderBy: [

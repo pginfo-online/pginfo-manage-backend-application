@@ -391,6 +391,7 @@ export class PaymentsService {
                 ? [
                     {
                       id: input.referenceId!,
+                      paymentLinkId: null,
                       notes: 'Money payment link',
                       mode: 'RAZORPAY' as const,
                     },
@@ -410,6 +411,15 @@ export class PaymentsService {
       const current = await tx.payment.findUniqueOrThrow({
         where: { id: payment.id },
       });
+      if (
+        input.linkId &&
+        current.paymentLinkId &&
+        current.paymentLinkId !== input.linkId
+      ) {
+        throw new UnauthorizedError(
+          'Captured link does not match the payment intent',
+        );
+      }
       if (['CONFIRMED', 'DISPUTED'].includes(current.status)) {
         if (current.razorpayPaymentId === input.gatewayPaymentId)
           return current;
@@ -465,7 +475,9 @@ export class PaymentsService {
           })
         : null;
       const status =
-        due < current.amount || (current.billingRecordId && !target)
+        due < current.amount ||
+        (current.billingRecordId &&
+          (!target || target.amount - target.paidAmount < current.amount))
           ? 'DISPUTED'
           : 'CONFIRMED';
       if (status === 'CONFIRMED')

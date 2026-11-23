@@ -13,6 +13,8 @@ import {
 } from '../../communications/domain/notification.interfaces.js';
 import type { EnvConfig } from '../../../config/index.js';
 import { Prisma } from '@prisma/client';
+import { dateKeyInTimeZone } from '../../../common/time/property-date.js';
+import { MoneyLinksService } from './money-links.service.js';
 import { PaymentsService } from './payments.service.js';
 
 export interface RazorpayWebhookPayload {
@@ -96,6 +98,7 @@ export class RazorpayWebhookService {
     @Inject(EMAIL_ADAPTER)
     private readonly emailAdapter?: EmailAdapter,
     @Optional() private readonly paymentsService?: PaymentsService,
+    @Optional() private readonly moneyLinks?: MoneyLinksService,
   ) {}
 
   private getPlatformFeePaise(): number {
@@ -106,7 +109,11 @@ export class RazorpayWebhookService {
    * Authoritative webhook ingestion pipeline with strict HMAC SHA-256 verification,
    * idempotency deduplication, and handling of Autopay lifecycle events.
    */
-  async handleWebhook(rawBody: string, signature: string) {
+  async handleWebhook(
+    rawBody: string,
+    signature: string,
+    providerEventId?: string,
+  ) {
     // 1. Strict cryptographic signature verification
     const isValid = this.razorpayAdapter.verifyWebhookSignature(
       rawBody,
@@ -129,6 +136,7 @@ export class RazorpayWebhookService {
     // 3. Deduplication & Idempotency Key
     // Use event.id if provided by Razorpay; otherwise hash rawBody to guarantee deterministic event identity
     const eventId =
+      providerEventId ||
       event.id ||
       `evt_${createHash('sha256').update(rawBody).digest('hex').slice(0, 32)}`;
 
@@ -329,7 +337,14 @@ export class RazorpayWebhookService {
     const subscriptionId = payment?.subscription_id || sub?.id;
     const totalAmount = payment?.amount;
 
-    if (!paymentId || !subscriptionId || !totalAmount) {
+    if (
+      !paymentId ||
+      !subscriptionId ||
+      !Number.isSafeInteger(totalAmount) ||
+      !totalAmount ||
+      totalAmount <= 0 ||
+      (payment?.currency && payment.currency !== 'INR')
+    ) {
       this.logger.warn(
         'Incomplete payment/subscription details in subscription.charged event',
       );
@@ -353,10 +368,12 @@ export class RazorpayWebhookService {
       return;
     }
 
-    // Determine billing month & year (current month)
-    const now = new Date();
-    const billingMonth = now.getUTCMonth() + 1;
-    const billingYear = now.getUTCFullYear();
+    const now = event.created_at
+      ? new Date(event.created_at * 1000)
+      : new Date();
+    const propertyDate = dateKeyInTimeZone(now, mandate.property.timezone);
+    const billingMonth = Number(propertyDate.slice(5, 7));
+    const billingYear = Number(propertyDate.slice(0, 4));
 
     // Calculate Route split
     const platformFee = this.getPlatformFeePaise();
@@ -365,8 +382,28 @@ export class RazorpayWebhookService {
     const invoiceNumber = `INV-${billingYear}${String(billingMonth).padStart(2, '0')}-${mandate.tenantId.slice(0, 8).toUpperCase()}`;
 
     // Execute database updates inside transaction
-    const invoice = await this.prisma.$transaction(async (tx) => {
-      // Upsert RentInvoice
+    const capture = await this.prisma.$transaction(async (tx) => {
+      // Serialize subscription captures against manual and payment-link collections.
+      await tx.$queryRaw`SELECT id FROM residents WHERE id=${mandate.tenantId}::uuid FOR UPDATE`;
+      const previous = await tx.payment.findUnique({
+        where: { razorpayPaymentId: paymentId },
+        select: { id: true },
+      });
+      if (previous) return null;
+
+      const settledInvoice = await tx.rentInvoice.findUnique({
+        where: {
+          tenantId_billingMonth_billingYear: {
+            tenantId: mandate.tenantId,
+            billingMonth,
+            billingYear,
+          },
+        },
+        select: { status: true },
+      });
+      const alreadySettled = settledInvoice?.status === 'PAID';
+
+      // Preserve a previously settled invoice when a distinct charge arrives.
       const inv = await tx.rentInvoice.upsert({
         where: {
           tenantId_billingMonth_billingYear: {
@@ -395,15 +432,17 @@ export class RazorpayWebhookService {
           paidAt: now,
           razorpayPaymentId: paymentId,
         },
-        update: {
-          status: 'PAID',
-          paidAt: now,
-          collectionType: 'AUTOPAY',
-          razorpayPaymentId: paymentId,
-          amount: totalAmount,
-          platformFee,
-          transferAmount,
-        },
+        update: alreadySettled
+          ? {}
+          : {
+              status: 'PAID',
+              paidAt: now,
+              collectionType: 'AUTOPAY',
+              razorpayPaymentId: paymentId,
+              amount: totalAmount,
+              platformFee,
+              transferAmount,
+            },
       });
 
       // Increment mandate paid count
@@ -411,7 +450,9 @@ export class RazorpayWebhookService {
         where: { id: mandate.id },
         data: {
           paidCount: { increment: 1 },
-          status: 'ACTIVE',
+          ...(!['REVOKED', 'PAUSED'].includes(mandate.status)
+            ? { status: 'ACTIVE' as const }
+            : {}),
         },
       });
 
@@ -419,18 +460,30 @@ export class RazorpayWebhookService {
       const billingRecord = await tx.billingRecord.findFirst({
         where: {
           residentId: mandate.tenantId,
+          organizationId: mandate.organizationId,
+          propertyId: mandate.propertyId,
           type: 'RENT',
           billingMonth,
           billingYear,
         },
       });
 
-      if (billingRecord) {
+      const canAllocate =
+        !alreadySettled &&
+        billingRecord &&
+        ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'].includes(
+          billingRecord.status,
+        ) &&
+        billingRecord.amount - billingRecord.paidAmount >= totalAmount;
+      if (canAllocate) {
+        const paidAmount = billingRecord.paidAmount + totalAmount;
         await tx.billingRecord.update({
-          where: { id: billingRecord.id },
+          where: { id: billingRecord.id, version: billingRecord.version },
           data: {
-            status: 'PAID',
-            paidAmount: totalAmount,
+            status:
+              paidAmount === billingRecord.amount ? 'PAID' : 'PARTIALLY_PAID',
+            paidAmount,
+            version: { increment: 1 },
           },
         });
 
@@ -446,9 +499,9 @@ export class RazorpayWebhookService {
         data: {
           organizationId: mandate.organizationId,
           residentId: mandate.tenantId,
-          billingRecordId: billingRecord?.id,
+          billingRecordId: canAllocate ? billingRecord.id : undefined,
           amount: totalAmount,
-          status: 'CONFIRMED',
+          status: canAllocate ? 'CONFIRMED' : 'DISPUTED',
           mode: 'RAZORPAY',
           collectionDate: now,
           razorpayPaymentId: paymentId,
@@ -457,12 +510,54 @@ export class RazorpayWebhookService {
         },
       });
 
-      return inv;
+      if (!canAllocate) {
+        await tx.auditLog.create({
+          data: {
+            organizationId: mandate.organizationId,
+            action: 'payment.reconciliation_required',
+            entityType: 'RentInvoice',
+            entityId: inv.id,
+            metadata: {
+              paymentId,
+              amount: totalAmount,
+              reason: 'Rent due missing or changed',
+            },
+          },
+        });
+      }
+      if (canAllocate && transferAmount > 0) {
+        await tx.auditLog.create({
+          data: {
+            organizationId: mandate.organizationId,
+            action: 'payment.route_transfer_pending',
+            entityType: 'RentInvoice',
+            entityId: inv.id,
+            metadata: { paymentId, amount: transferAmount },
+          },
+        });
+      }
+      return { invoice: inv, canAllocate };
     });
+    if (!capture?.canAllocate) return;
+    const { invoice } = capture;
 
     // Execute transfer via Razorpay Route to landlord linked account
     let transferId: string | null = null;
-    const linkedAccountId = mandate.landlordPayoutAccount?.razorpayAccountId;
+    const payout = mandate.landlordPayoutAccount;
+    const metadata = payout?.metadata;
+    const routeProductId =
+      metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        ? metadata.routeProductId
+        : null;
+    const linkedAccountId =
+      payout?.status === 'ACTIVE' &&
+      payout.kycStatus === 'VERIFIED' &&
+      typeof routeProductId === 'string' &&
+      routeProductId.startsWith('acc_prd_') &&
+      payout.razorpayAccountId.startsWith('acc_') &&
+      !payout.razorpayAccountId.startsWith('acc_sim_')
+        ? payout.razorpayAccountId
+        : null;
 
     if (linkedAccountId && transferAmount > 0) {
       try {
@@ -479,13 +574,12 @@ export class RazorpayWebhookService {
             },
           },
         );
-        transferId = transferResult.transferId;
-
         await this.prisma.rentInvoice.update({
           where: { id: invoice.id },
-          data: { razorpayTransferId: transferId },
+          data: { razorpayTransferId: transferResult.transferId },
         });
 
+        transferId = transferResult.transferId;
         this.logger.log(
           `Razorpay Route transfer ${transferId} executed: ₹${Monetary.toRupees(transferAmount)} routed to ${linkedAccountId}`,
         );
@@ -500,12 +594,30 @@ export class RazorpayWebhookService {
       );
     }
 
+    if (transferAmount > 0 && !transferId) {
+      await this.prisma.auditLog.create({
+        data: {
+          organizationId: mandate.organizationId,
+          action: 'payment.route_transfer_reconciliation_required',
+          entityType: 'RentInvoice',
+          entityId: invoice.id,
+          metadata: {
+            paymentId,
+            amount: transferAmount,
+            reason: linkedAccountId
+              ? 'Provider transfer result needs review'
+              : 'Owner account is not verified for Route',
+          },
+        },
+      });
+    }
+
     // Trigger payment receipts
     await this.sendReceiptNotifications(
       mandate,
       totalAmount,
       platformFee,
-      transferAmount,
+      transferId ? transferAmount : null,
       billingMonth,
       billingYear,
       paymentId,
@@ -519,13 +631,13 @@ export class RazorpayWebhookService {
     mandate: any,
     totalAmount: number,
     platformFee: number,
-    transferAmount: number,
+    transferAmount: number | null,
     month: number,
     year: number,
     paymentId: string,
   ) {
     const rentRupees = Monetary.toRupees(totalAmount);
-    const landlordRupees = Monetary.toRupees(transferAmount);
+
     const unitStr = mandate.unit
       ? `Unit ${mandate.unit.roomNumber}`
       : 'your unit';
@@ -560,13 +672,17 @@ export class RazorpayWebhookService {
     }
 
     // Landlord notification
-    if (mandate.landlordPayoutAccount?.phone && this.whatsappAdapter) {
+    if (
+      transferAmount !== null &&
+      mandate.landlordPayoutAccount?.phone &&
+      this.whatsappAdapter
+    ) {
       const landlordMsg =
         `💰 Rent Received via Autopay!\n\n` +
         `Tenant ${mandate.tenant.firstName} paid rent for ${mandate.property.name} (${unitStr}).\n` +
         `Total Rent: ₹${rentRupees.toLocaleString('en-IN')}\n` +
         `Platform Fee: ₹${Monetary.toRupees(platformFee)}\n` +
-        `Transferred to Your Bank: ₹${landlordRupees.toLocaleString('en-IN')}\n` +
+        `Route transfer requested: ₹${Monetary.toRupees(transferAmount).toLocaleString('en-IN')} (bank settlement pending)\n` +
         `Payment ID: ${paymentId}`;
 
       try {
@@ -620,32 +736,29 @@ export class RazorpayWebhookService {
       return;
     }
 
-    const now = new Date();
-    const billingMonth = now.getUTCMonth() + 1;
-    const billingYear = now.getUTCFullYear();
+    const now = event.created_at
+      ? new Date(event.created_at * 1000)
+      : new Date();
+    const propertyDate = dateKeyInTimeZone(now, mandate.property.timezone);
+    const billingMonth = Number(propertyDate.slice(5, 7));
+    const billingYear = Number(propertyDate.slice(0, 4));
+    const key = { tenantId: mandate.tenantId, billingMonth, billingYear };
+    const settled = await this.prisma.rentInvoice.findUnique({
+      where: { tenantId_billingMonth_billingYear: key },
+      select: { status: true },
+    });
+    if (settled?.status === 'PAID') return;
 
-    // Generate fallback instant payment link via Razorpay
     let fallbackPaymentUrl: string | null = null;
     try {
-      const link = await this.razorpayAdapter.createPaymentLink({
-        amountPaise: mandate.rentAmount,
-        description: `Fallback Rent Payment - ${billingMonth}/${billingYear} - ${mandate.property.name}`,
-        customer: {
-          name: `${mandate.tenant.firstName} ${mandate.tenant.lastName ?? ''}`.trim(),
-          contact: mandate.tenant.mobile,
-          email: mandate.tenant.email ?? undefined,
-        },
-        notes: {
-          mandateId: mandate.id,
-          tenantId: mandate.tenantId,
-          billingMonth: String(billingMonth),
-          billingYear: String(billingYear),
-        },
-      });
-      fallbackPaymentUrl = link.shortUrl;
+      const link = await this.moneyLinks?.create(
+        mandate.tenantId,
+        mandate.organizationId,
+      );
+      fallbackPaymentUrl = link?.paymentLink ?? null;
     } catch (err) {
-      this.logger.error(
-        `Failed to generate fallback payment link: ${(err as Error).message}`,
+      this.logger.warn(
+        `Unable to prepare fallback payment for mandate ${mandate.id}: ${(err as Error).message}`,
       );
     }
 
@@ -678,11 +791,16 @@ export class RazorpayWebhookService {
         dueDate: new Date(
           Date.UTC(billingYear, billingMonth - 1, mandate.billingDay),
         ),
-        retryCount: 1,
+        retryCount: 0,
         failureReason,
         fallbackPaymentUrl,
       },
-      update: {
+      update: {},
+    });
+    if (invoice.status === 'PAID') return;
+    await this.prisma.rentInvoice.updateMany({
+      where: { id: invoice.id, status: { not: 'PAID' } },
+      data: {
         status: 'FAILED',
         retryCount: { increment: 1 },
         failureReason,
@@ -712,12 +830,18 @@ export class RazorpayWebhookService {
         : `Please contact your property manager to complete the rent payment.\n\n`) +
       `Autopay will retry on the next scheduled cycle.`;
 
-    if (this.whatsappAdapter) {
+    if (this.whatsappAdapter && mandate.tenant.sendWhatsappReminder !== false) {
       try {
         await this.whatsappAdapter.send({
           to: tenantPhone,
           message: alertMessage,
           templateName: 'rent_autopay_failed_fallback',
+          templateParams: {
+            tenant_name: mandate.tenant.firstName,
+            property_name: mandate.property.name,
+            amount: Monetary.formatINR(mandate.rentAmount),
+            payment_link: fallbackPaymentUrl ?? 'Contact your property manager',
+          },
         });
       } catch (err) {
         this.logger.warn(
@@ -727,7 +851,7 @@ export class RazorpayWebhookService {
     }
 
     this.logger.warn(
-      `Autopay payment failed for tenant ${mandate.tenant.firstName} (Invoice: ${invoice.id}). Fallback link: ${fallbackPaymentUrl}`,
+      `Autopay payment failed for invoice ${invoice.id}; fallback link ${fallbackPaymentUrl ? 'prepared' : 'unavailable'}`,
     );
   }
 

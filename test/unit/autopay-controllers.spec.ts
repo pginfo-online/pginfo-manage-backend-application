@@ -66,6 +66,7 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
         businessType: 'individual' as const,
         accountNumber: '123456789012',
         ifscCode: 'HDFC0001234',
+        routeTermsAccepted: true as const,
       };
 
       const res = await payoutsController.onboardOwner(dto, orgId, userId);

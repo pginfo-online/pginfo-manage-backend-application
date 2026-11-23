@@ -223,6 +223,27 @@ export class AnnouncementsService {
     };
   }
 
+  async whatsappReminderHistory(orgId: string, residentId: string) {
+    return this.prisma.$queryRaw`
+      SELECT CASE WHEN a.action = 'communications.autopay_reminders_sent' THEN 'autopay'
+                  ELSE 'rent' END AS kind,
+             a.created_at AS "requestedAt",
+             COALESCE(d.status, 'accepted') AS status,
+             d.status_at AS "statusAt",
+             d.failure_code AS "failureCode"
+      FROM audit_logs a
+      CROSS JOIN LATERAL jsonb_array_elements(
+        COALESCE(a.metadata->'whatsappDeliveries', '[]'::jsonb)
+      ) AS reminder
+      LEFT JOIN whatsapp_deliveries d ON d.message_id = reminder->>'messageId'
+      WHERE a.organization_id = ${orgId}::uuid
+        AND a.action IN ('communications.autopay_reminders_sent', 'communications.rent_reminders_sent')
+        AND (reminder->>'residentId') = ${residentId}
+      ORDER BY a.created_at DESC
+      LIMIT 20
+    `;
+  }
+
   /**
    * Sends individual or bulk rent reminders to residents with outstanding dues.
    */
@@ -247,6 +268,7 @@ export class AnnouncementsService {
     let missingMandates = 0;
     const whatsapp = { accepted: 0, failed: 0, skipped: 0 };
     const email = { accepted: 0, failed: 0, skipped: 0 };
+    const whatsappDeliveries: { residentId: string; messageId: string }[] = [];
     let whatsappMessageId: string | null = null;
     let whatsappError: string | null = null;
     let totalRemindedPaise = 0;
@@ -359,6 +381,14 @@ export class AnnouncementsService {
                 ? this.whatsappAdapter.send({
                     to: resident.whatsappNumber || resident.mobile,
                     message,
+                    ...(!autopay
+                      ? {
+                          rentReminder: {
+                            residentName: resident.firstName,
+                            balance: Monetary.formatINR(due),
+                          },
+                        }
+                      : {}),
                     templateName: invite?.template,
                     templateParams: invite?.templateParams,
                   })
@@ -385,8 +415,13 @@ export class AnnouncementsService {
               } else if (delivery?.success) {
                 stats.accepted++;
                 accepted = true;
-                if (dto.residentId && stats === whatsapp)
-                  whatsappMessageId = delivery.messageId ?? null;
+                if (stats === whatsapp && delivery.messageId) {
+                  whatsappDeliveries.push({
+                    residentId: resident.id,
+                    messageId: delivery.messageId,
+                  });
+                  if (dto.residentId) whatsappMessageId = delivery.messageId;
+                }
               } else {
                 stats.failed++;
                 failed = true;
@@ -427,6 +462,7 @@ export class AnnouncementsService {
           email,
           missingMandates,
           whatsappMessageId,
+          whatsappDeliveries,
           whatsappError,
         },
       },

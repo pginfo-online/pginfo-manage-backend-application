@@ -16,6 +16,8 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
 
   beforeEach(() => {
     mockPrisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{ acquired: true }]),
+      $transaction: vi.fn((fn) => fn(mockPrisma)),
       resident: {
         findFirst: vi.fn().mockResolvedValue({
           id: tenantId,
@@ -49,6 +51,7 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
     };
 
     mockRazorpayAdapter = {
+      canCreateMoneyLinks: vi.fn().mockReturnValue(true),
       createPlan: vi.fn().mockResolvedValue({ planId: 'plan_rent_123' }),
       createSubscription: vi.fn().mockResolvedValue({
         subscriptionId: 'sub_rent_456',
@@ -125,11 +128,15 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
       notes: expect.any(Object),
     });
 
+    expect(result.nextChargeDate.getUTCDate()).toBe(5);
+    expect(result.nextChargeDate.getTime()).toBeGreaterThan(Date.now());
+
     // Verify subscription creation
     expect(mockRazorpayAdapter.createSubscription).toHaveBeenCalledWith({
       planId: 'plan_rent_123',
       totalCount: 11,
       customerNotify: 1,
+      startAt: Math.floor(result.nextChargeDate.getTime() / 1000),
       notes: expect.any(Object),
     });
 

@@ -17,14 +17,14 @@ export class BillingService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Generates monthly rent dues for all active residents.
+   * Generates rent dues for active residents whose billing cycle is due.
    * Completely idempotent: running multiple times for the same month/year
    * will never produce duplicate billing records.
    */
   async generateMonthlyDues(
     dto: GenerateMonthlyDuesDto,
     orgId: string,
-    userId: string,
+    userId?: string,
   ) {
     // One INSERT ... SELECT replaces a resident scan and two round trips per
     // resident. Both unique constraints remain the concurrency authority.
@@ -40,15 +40,24 @@ export class BillingService {
       { generatedCount: number; skippedCount: number; totalAmount: number }[]
     >(Prisma.sql`
       WITH candidates AS MATERIALIZED (
-        SELECT r.id,r.organization_id,r.property_id,r.monthly_rent,
+        SELECT r.id,r.organization_id,r.property_id,r.monthly_rent,r.rental_frequency_months,
+          COALESCE(r.move_in_date,r.joining_date)::date AS rent_start,
           LEAST(COALESCE(r.rent_due_day,p.rent_due_day),${endOfMonth.getUTCDate()}) AS due_day
         FROM residents r JOIN properties p ON p.id=r.property_id
-        WHERE r.organization_id=${orgId}::uuid AND r.status IN ('ACTIVE','NOTICE_PERIOD')
+        CROSS JOIN LATERAL (
+          SELECT (${dto.billingYear}::int - EXTRACT(YEAR FROM COALESCE(r.move_in_date,r.joining_date)))::int * 12
+            + ${dto.billingMonth}::int - EXTRACT(MONTH FROM COALESCE(r.move_in_date,r.joining_date))::int AS months_since_start
+        ) cycle
+        WHERE cycle.months_since_start >= CASE WHEN r.skip_first_rent THEN 1 ELSE 0 END
+          AND cycle.months_since_start % r.rental_frequency_months = 0
+          AND r.organization_id=${orgId}::uuid AND r.status IN ('ACTIVE','NOTICE_PERIOD')
           ${dto.propertyId ? Prisma.sql`AND r.property_id=${dto.propertyId}::uuid` : Prisma.empty}
       ), inserted AS (
         INSERT INTO billing_records (id,organization_id,resident_id,property_id,type,status,amount,billing_month,billing_year,due_date,period_start,period_end,description,idempotency_key,updated_at)
-        SELECT gen_random_uuid(),organization_id,id,property_id,'RENT','ISSUED',monthly_rent,${dto.billingMonth},${dto.billingYear},
-          make_date(${dto.billingYear}::int,${dto.billingMonth}::int,due_day::int),${startOfMonth},${endOfMonth},${`Rent for ${monthName} ${dto.billingYear}`},
+        SELECT gen_random_uuid(),organization_id,id,property_id,'RENT','ISSUED',monthly_rent * rental_frequency_months,${dto.billingMonth},${dto.billingYear},
+          GREATEST(make_date(${dto.billingYear}::int,${dto.billingMonth}::int,due_day::int),rent_start),
+          GREATEST(${startOfMonth}::date,rent_start),
+          (${startOfMonth}::date + make_interval(months => rental_frequency_months) - interval '1 day')::date,${`Rent for ${monthName} ${dto.billingYear}`},
           'rent_'||id::text||'_'||${String(dto.billingYear)}||'_'||${String(dto.billingMonth)},NOW()
         FROM candidates ON CONFLICT DO NOTHING RETURNING amount
       ) SELECT (SELECT COUNT(*)::int FROM inserted) AS "generatedCount",
@@ -57,22 +66,22 @@ export class BillingService {
     `);
     const { generatedCount, skippedCount, totalAmount } = result!;
 
-    // Audit log
-    await this.prisma.auditLog.create({
-      data: {
-        organizationId: orgId,
-        userId,
-        action: 'billing.generate_monthly_dues',
-        metadata: {
-          billingMonth: dto.billingMonth,
-          billingYear: dto.billingYear,
-          propertyId: dto.propertyId,
-          generatedCount,
-          skippedCount,
-          totalAmount,
+    if (userId || generatedCount > 0)
+      await this.prisma.auditLog.create({
+        data: {
+          organizationId: orgId,
+          userId,
+          action: 'billing.generate_monthly_dues',
+          metadata: {
+            billingMonth: dto.billingMonth,
+            billingYear: dto.billingYear,
+            propertyId: dto.propertyId,
+            generatedCount,
+            skippedCount,
+            totalAmount,
+          },
         },
-      },
-    });
+      });
 
     this.logger.log(
       `Generated ${generatedCount} dues (${skippedCount} skipped) totaling ₹${totalAmount / 100} for ${dto.billingMonth}/${dto.billingYear}`,
