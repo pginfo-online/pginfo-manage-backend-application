@@ -11,7 +11,7 @@ export declare class AdminAccessController {
         permissions: ("dashboard.read" | "users.read" | "users.write" | "organizations.read" | "organizations.write" | "properties.read" | "properties.write" | "inventory.read" | "inventory.write" | "residents.read" | "bookings.read" | "finance.read" | "finance.review" | "banks.read" | "banks.review" | "reports.read" | "audit.read" | "support.read" | "support.write" | "settings.read" | "settings.write" | "admins.manage")[];
         user: {
             id: string;
-            email: string;
+            email: string | null;
             mobile: string | null;
             firstName: string;
             lastName: string | null;
@@ -29,7 +29,7 @@ export declare class AdminAccessController {
     listAdmins(query: AdminListQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
             isActive: boolean;
@@ -48,7 +48,7 @@ export declare class AdminAccessController {
     createAdmin(dto: CreatePlatformAdminDto, actor: PlatformAdminContext, request: Request): Promise<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
@@ -65,7 +65,7 @@ export declare class AdminAccessController {
     updateAdmin(id: string, dto: UpdatePlatformAdminDto, actor: PlatformAdminContext, request: Request): Promise<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
         };
     } & {
@@ -84,7 +84,7 @@ export declare class AdminAccessController {
             role: import("@prisma/client").$Enums.PlatformRole;
         } | null;
         id: string;
-        email: string;
+        email: string | null;
         mobile: string | null;
         firstName: string;
         lastName: string | null;
@@ -112,7 +112,7 @@ export declare class AdminAccessController {
             permissionOverrides: string[];
         } | null;
         id: string;
-        email: string;
+        email: string | null;
         mobile: string | null;
         firstName: string;
         lastName: string | null;
@@ -141,14 +141,14 @@ export declare class AdminAccessController {
         payoutAccounts: {
             id: string;
             status: import("@prisma/client").$Enums.PayoutAccountStatus;
-            businessName: string;
             kycStatus: import("@prisma/client").$Enums.KycStatus;
+            businessName: string;
             accountNumberMasked: string;
         }[];
     }>;
     updateUserStatus(id: string, dto: UpdateUserStatusDto, actor: PlatformAdminContext, request: Request): Promise<{
         id: string;
-        email: string;
+        email: string | null;
         firstName: string;
         lastName: string | null;
         isActive: boolean;

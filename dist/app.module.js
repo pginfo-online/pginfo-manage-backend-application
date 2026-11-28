@@ -41,7 +41,7 @@ AppModule = __decorate([
                 isGlobal: true,
                 validate,
                 envFilePath: process.env['NODE_ENV'] === 'test'
-                    ? ['.env.test', '.env']
+                    ? ['.env.test']
                     : ['.env', '.env.local'],
             }),
             ThrottlerModule.forRoot({

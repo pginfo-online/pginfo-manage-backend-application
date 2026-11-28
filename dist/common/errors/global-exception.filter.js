@@ -7,6 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var GlobalExceptionFilter_1;
 import { Catch, HttpException, HttpStatus, Logger, } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
+import { AppError } from './app-errors.js';
 let GlobalExceptionFilter = GlobalExceptionFilter_1 = class GlobalExceptionFilter {
     logger = new Logger(GlobalExceptionFilter_1.name);
     catch(exception, host) {
@@ -64,6 +65,15 @@ let GlobalExceptionFilter = GlobalExceptionFilter_1 = class GlobalExceptionFilte
         };
         if (errors) {
             problem.errors = errors;
+        }
+        if (status === 429 && exception instanceof AppError) {
+            const seconds = exception.metadata?.['retryAfterSeconds'];
+            if (typeof seconds === 'number' &&
+                Number.isSafeInteger(seconds) &&
+                seconds > 0) {
+                problem.retryAfterSeconds = seconds;
+                response.setHeader('Retry-After', String(seconds));
+            }
         }
         response.status(status).json(problem);
     }

@@ -5,6 +5,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 import { Module } from '@nestjs/common';
+import { BankAccountCipher } from './infrastructure/bank-account-cipher.js';
 import { BillingController } from './api/billing.controller.js';
 import { PaymentsController } from './api/payments.controller.js';
 import { PayoutsController } from './api/payouts.controller.js';
@@ -37,6 +38,7 @@ FinanceModule = __decorate([
             RazorpayWebhookController,
         ],
         providers: [
+            BankAccountCipher,
             MoneyLinksService,
             MoneyService,
             BillingService,
@@ -48,6 +50,7 @@ FinanceModule = __decorate([
             RazorpayAdapter,
         ],
         exports: [
+            BankAccountCipher,
             BillingService,
             PaymentsService,
             PayoutsService,

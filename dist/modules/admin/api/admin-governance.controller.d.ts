@@ -10,7 +10,7 @@ export declare class AdminGovernanceController {
     auditLogs(query: AdminAuditQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         } | null;
@@ -33,20 +33,20 @@ export declare class AdminGovernanceController {
     listCases(query: AdminCasesQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         createdBy: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
         assignedTo: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         } | null;
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -65,8 +65,8 @@ export declare class AdminGovernanceController {
     }>>;
     createCase(dto: CreateAdminCaseDto, actor: PlatformAdminContext, request: Request): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -85,8 +85,8 @@ export declare class AdminGovernanceController {
     }>;
     updateCase(id: string, dto: UpdateAdminCaseDto, actor: PlatformAdminContext, request: Request): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -106,7 +106,7 @@ export declare class AdminGovernanceController {
     listSettings(query: AdminListQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         updatedBy: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
         };
     } & {

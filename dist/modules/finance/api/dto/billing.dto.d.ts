@@ -77,16 +77,16 @@ export declare const queryBillingSchema: z.ZodObject<{
     limit: number;
     page: number;
     search?: string | undefined;
-    status?: "CANCELLED" | "ISSUED" | "DUE" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "WAIVED" | undefined;
     type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+    status?: "CANCELLED" | "ISSUED" | "DUE" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "WAIVED" | undefined;
     year?: number | undefined;
     month?: number | undefined;
     propertyId?: string | undefined;
     residentId?: string | undefined;
 }, {
     search?: string | undefined;
-    status?: "CANCELLED" | "ISSUED" | "DUE" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "WAIVED" | undefined;
     type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "WATER" | "MAINTENANCE" | "LATE_FEE" | undefined;
+    status?: "CANCELLED" | "ISSUED" | "DUE" | "PARTIALLY_PAID" | "PAID" | "OVERDUE" | "WAIVED" | undefined;
     year?: number | undefined;
     limit?: number | undefined;
     page?: number | undefined;

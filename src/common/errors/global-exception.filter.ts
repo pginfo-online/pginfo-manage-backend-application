@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { AppError } from './app-errors.js';
 
 /**
  * Error response following RFC 9457 Problem Details.
@@ -21,6 +22,7 @@ interface ProblemDetail {
   traceId: string;
   timestamp: string;
   errors?: Array<{ field: string; message: string }>;
+  retryAfterSeconds?: number;
 }
 
 /**
@@ -100,6 +102,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (errors) {
       problem.errors = errors;
+    }
+
+    if (status === 429 && exception instanceof AppError) {
+      const seconds = exception.metadata?.['retryAfterSeconds'];
+      if (
+        typeof seconds === 'number' &&
+        Number.isSafeInteger(seconds) &&
+        seconds > 0
+      ) {
+        problem.retryAfterSeconds = seconds;
+        response.setHeader('Retry-After', String(seconds));
+      }
     }
 
     response.status(status).json(problem);

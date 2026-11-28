@@ -15,12 +15,37 @@ export class MoneyLinksService {
     private readonly gateway: RazorpayAdapter,
     private readonly money: MoneyService,
   ) {}
-  async create(residentId: string, org: string, user?: string) {
+  create(
+    residentId: string,
+    org: string,
+    user?: string,
+  ): Promise<{ paymentLink: string; amount: number; expiresAt: Date | null }>;
+  create(
+    residentId: string,
+    org: string,
+    user: string,
+    kind: 'qr',
+  ): Promise<{ qrImageUrl: string; amount: number; expiresAt: Date | null }>;
+  async create(
+    residentId: string,
+    org: string,
+    user?: string,
+    kind: 'link' | 'qr' = 'link',
+  ) {
+    const notes = kind === 'link' ? 'Money payment link' : 'Money payment QR';
     const context = await this.money.paymentContext(residentId, org);
     if (context.totalDues <= 0)
       throw new BadRequestException('This tenant has no outstanding dues');
     if (context.totalDues > 2147483647)
       throw new BadRequestException('Split this balance into smaller payments');
+    const properties = [
+      ...new Set(context.bills.map((bill) => bill.propertyId)),
+    ];
+    if (properties.length !== 1)
+      throw new BadRequestException(
+        'Online collection requires outstanding dues for a single property',
+      );
+    const propertyId = properties[0]!;
     if (!this.gateway.canCreateMoneyLinks())
       throw new ServiceUnavailableException(
         'Configure Razorpay API credentials and webhook secret to create payment links',
@@ -31,6 +56,7 @@ export class MoneyLinksService {
         where: {
           residentId,
           organizationId: org,
+          propertyId,
           status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
         },
         _sum: { amount: true, paidAmount: true },
@@ -48,7 +74,11 @@ export class MoneyLinksService {
           residentId,
           amount: context.totalDues,
           status: 'PENDING',
-          notes: 'Money payment link',
+          notes,
+          OR: [
+            { capturePropertyId: propertyId },
+            { capturePropertyId: null, resident: { propertyId } },
+          ],
           paymentLinkExpiresAt: { gt: new Date() },
         },
         orderBy: { createdAt: 'desc' },
@@ -64,27 +94,57 @@ export class MoneyLinksService {
         data: {
           organizationId: org,
           residentId,
+          capturePropertyId: propertyId,
           amount: context.totalDues,
           mode: 'RAZORPAY',
           status: 'PENDING',
           collectionDate: new Date(),
-          notes: 'Money payment link',
+          notes,
           recordedBy: user,
           paymentLinkExpiresAt: new Date(Date.now() + 30 * 60000),
         },
       });
     });
+    const result = (url: string, expiresAt: Date | null) => ({
+      ...(kind === 'qr' ? { qrImageUrl: url } : { paymentLink: url }),
+      amount: payment.amount,
+      expiresAt,
+    });
     if (payment.paymentLinkUrl)
-      return {
-        paymentLink: payment.paymentLinkUrl,
-        amount: payment.amount,
-        expiresAt: payment.paymentLinkExpiresAt,
-      };
+      return result(payment.paymentLinkUrl, payment.paymentLinkExpiresAt);
+    if (kind === 'qr') {
+      const qr = await this.gateway.createCollectionQr(
+        payment.amount,
+        Math.floor(payment.paymentLinkExpiresAt!.getTime() / 1000),
+        payment.id,
+      );
+      await this.prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id: payment.id },
+          data: {
+            gatewayQrId: qr.id,
+            paymentLinkUrl: qr.imageUrl,
+            paymentLinkExpiresAt: qr.expiresAt,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            organizationId: org,
+            userId: user,
+            action: 'money.payment_qr.create',
+            entityType: 'Payment',
+            entityId: payment.id,
+            metadata: { qrId: qr.id, amount: payment.amount },
+          },
+        });
+      });
+      return result(qr.imageUrl, qr.expiresAt);
+    }
     // Keep the durable pending intent on a network error: the signed paid webhook
     // can still reconcile a provider link whose creation response was lost.
     const link = await this.gateway.createPaymentLink({
       amountPaise: payment.amount,
-      description: `Outstanding dues at ${context.resident.property.name}`,
+      description: 'PGInfo outstanding accommodation dues',
       customer: {
         name: [context.resident.firstName, context.resident.lastName]
           .filter(Boolean)

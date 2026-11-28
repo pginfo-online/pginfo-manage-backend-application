@@ -11,6 +11,11 @@ export declare class MoneyController {
         amount: number;
         expiresAt: Date | null;
     }>;
+    createQr(id: string, org: string, user: string): Promise<{
+        qrImageUrl: string;
+        amount: number;
+        expiresAt: Date | null;
+    }>;
     properties(org: string, q: MoneyQuery): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         id: string;
         type: import("@prisma/client").$Enums.PropertyType;
@@ -97,8 +102,8 @@ export declare class MoneyController {
             };
         } & {
             id: string;
-            status: import("@prisma/client").$Enums.BillingStatus;
             type: import("@prisma/client").$Enums.BillingType;
+            status: import("@prisma/client").$Enums.BillingStatus;
             createdAt: Date;
             updatedAt: Date;
             organizationId: string;
@@ -123,12 +128,12 @@ export declare class MoneyController {
             createdAt: Date;
             organizationId: string;
             description: string;
+            consumedAt: Date | null;
             residentId: string;
             amount: number;
             validTill: Date;
             minimumPayment: string;
             minimumAmount: number | null;
-            consumedAt: Date | null;
         } | null;
         totalDues: number;
     }>;
@@ -163,12 +168,12 @@ export declare class MoneyController {
         createdAt: Date;
         organizationId: string;
         description: string;
+        consumedAt: Date | null;
         residentId: string;
         amount: number;
         validTill: Date;
         minimumPayment: string;
         minimumAmount: number | null;
-        consumedAt: Date | null;
     }>;
     remark(id: string, org: string, user: string, dto: {
         description: string;
@@ -204,6 +209,11 @@ export declare class MoneyController {
             paymentLinkId: string | null;
             paymentLinkUrl: string | null;
             paymentLinkExpiresAt: Date | null;
+            gatewayQrId: string | null;
+            capturedAt: Date | null;
+            capturePropertyId: string | null;
+            capturePlatformFee: number | null;
+            gatewayRefundedAmount: number;
             razorpayOrderId: string | null;
             razorpayPaymentId: string | null;
             razorpaySignature: string | null;
@@ -231,6 +241,11 @@ export declare class MoneyController {
             paymentLinkId: string | null;
             paymentLinkUrl: string | null;
             paymentLinkExpiresAt: Date | null;
+            gatewayQrId: string | null;
+            capturedAt: Date | null;
+            capturePropertyId: string | null;
+            capturePlatformFee: number | null;
+            gatewayRefundedAmount: number;
             razorpayOrderId: string | null;
             razorpayPaymentId: string | null;
             razorpaySignature: string | null;

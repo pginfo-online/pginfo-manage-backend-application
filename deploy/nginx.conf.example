@@ -46,6 +46,11 @@ server {
     }
 
     # Payment retries must not be blocked by the general browser rate limit.
+    # Compatibility for Razorpay configurations created before the /api/v1 prefix.
+    location = /v1/webhooks/razorpay {
+        proxy_pass http://127.0.0.1:3109/api/v1/webhooks/razorpay;
+    }
+
     location = /api/v1/webhooks/razorpay {
         proxy_pass http://127.0.0.1:3109;
     }

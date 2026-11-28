@@ -133,7 +133,7 @@ let OrganizationsService = OrganizationsService_1 = class OrganizationsService {
         }
         const accessToken = await this.tokenService.generateAccessToken({
             id: userId,
-            email: membership.user.email,
+            email: membership.user.email ?? '',
             orgId: targetOrgId,
             orgRole: membership.role,
         });

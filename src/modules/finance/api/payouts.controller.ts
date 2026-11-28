@@ -35,7 +35,7 @@ import {
   OrgRolesGuard,
 } from '../../../platform/authorization/index.js';
 
-@ApiTags('Finance: Landlord Payouts & Route')
+@ApiTags('Finance: Landlord Payout Accounts')
 @Controller('payouts')
 @UseGuards(JwtAuthGuard, RequireOrgGuard, OrgRolesGuard)
 @ApiBearerAuth('JWT')
@@ -46,22 +46,9 @@ export class PayoutsController {
   @HttpCode(HttpStatus.CREATED)
   @RequireOrgRoles('OWNER', 'ADMIN')
   @ApiOperation({
-    summary: 'Onboard landlord with KYC & bank details to Razorpay Route',
-    description:
-      'Creates a linked sub-merchant account via Razorpay Route and records the account_id for split payouts.',
+    summary: 'Submit owner bank details for manual payout review',
   })
-  @ApiResponse({
-    status: 201,
-    description: 'Owner successfully onboarded to Razorpay Route',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid KYC or bank account details',
-  })
-  @ApiResponse({
-    status: 409,
-    description: 'Owner payout account already exists',
-  })
+  @ApiResponse({ status: 201, description: 'Bank details saved for review' })
   async onboardOwner(
     @Body(new ZodValidationPipe(onboardOwnerSchema)) dto: OnboardOwnerDto,
     @CurrentOrgId() orgId: string,

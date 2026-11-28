@@ -12,8 +12,8 @@ export declare class BillingController {
     }>;
     createCharge(dto: CreateChargeDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -48,8 +48,8 @@ export declare class BillingController {
         };
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -96,8 +96,8 @@ export declare class BillingController {
         }[];
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -119,8 +119,8 @@ export declare class BillingController {
     }>;
     discount(id: string, dto: DiscountDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -142,8 +142,8 @@ export declare class BillingController {
     }>;
     cancel(id: string, orgId: string, userId: string, reason?: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;

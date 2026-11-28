@@ -5,7 +5,6 @@ export declare class PayoutsController {
     constructor(payoutsService: PayoutsService);
     onboardOwner(dto: OnboardOwnerDto, orgId: string, userId: string): Promise<{
         id: string;
-        accountId: string;
         businessName: string;
         beneficiaryName: string;
         accountNumberMasked: string;
@@ -20,7 +19,7 @@ export declare class PayoutsController {
     listAccounts(query: QueryPayoutAccountsDto, orgId: string): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
@@ -37,15 +36,15 @@ export declare class PayoutsController {
         userId: string;
         organizationId: string;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        propertyId: string | null;
         phone: string;
+        propertyId: string | null;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
         businessName: string;
         businessType: string;
         ifscCode: string;
-        kycStatus: import("@prisma/client").$Enums.KycStatus;
-        razorpayAccountId: string;
-        accountNumberMasked: string;
         beneficiaryName: string;
+        accountNumberMasked: string;
+        razorpayAccountId: string;
     }>>;
     getActiveAccount(propertyId: string | undefined, orgId: string): Promise<{
         id: string;
@@ -56,14 +55,14 @@ export declare class PayoutsController {
         userId: string;
         organizationId: string;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        propertyId: string | null;
         phone: string;
+        propertyId: string | null;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
         businessName: string;
         businessType: string;
         ifscCode: string;
-        kycStatus: import("@prisma/client").$Enums.KycStatus;
-        razorpayAccountId: string;
-        accountNumberMasked: string;
         beneficiaryName: string;
+        accountNumberMasked: string;
+        razorpayAccountId: string;
     }>;
 }

@@ -8,6 +8,7 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 var ExportService_1;
+import { paymentPropertyScope } from '../../finance/domain/collection-lines.js';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
@@ -34,7 +35,7 @@ let ExportService = ExportService_1 = class ExportService {
             where: {
                 organizationId: orgId,
                 status: 'CONFIRMED',
-                ...(propertyId ? { resident: { propertyId } } : {}),
+                ...paymentPropertyScope(propertyId),
             },
             include: {
                 resident: {
@@ -59,9 +60,9 @@ let ExportService = ExportService_1 = class ExportService {
             `${p.resident.firstName} ${p.resident.lastName ?? ''}`.trim(),
             p.resident.mobile,
             p.resident.property?.name ?? '',
-            Monetary.toRupees(p.amount),
+            Monetary.toRupees(p.amount - (p.gatewayRefundedAmount ?? 0)),
             p.mode,
-            p.reference ?? p.razorpayPaymentId ?? '',
+            p.razorpayPaymentId ?? p.reference ?? '',
         ]);
         return this.toCsv(headers, rows);
     }

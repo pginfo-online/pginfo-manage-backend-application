@@ -10,5 +10,7 @@ coverage
 docker-compose.yml
 deploy/secrets
 deploy/backups
+data
+payments_and_expenses
 **/__pycache__
 *.pyc

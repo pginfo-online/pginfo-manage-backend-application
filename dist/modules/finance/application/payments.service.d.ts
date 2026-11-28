@@ -4,7 +4,6 @@ import type { RecordPaymentDto, CreateRazorpayOrderDto, VerifyRazorpayPaymentDto
 export declare class PaymentsService {
     private readonly prisma;
     private readonly razorpayAdapter;
-    private readonly logger;
     constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter);
     recordPayment(dto: RecordPaymentDto, orgId: string, userId: string): Promise<{
         receiptNumber: string;
@@ -15,6 +14,14 @@ export declare class PaymentsService {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;
@@ -39,6 +46,14 @@ export declare class PaymentsService {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;
@@ -47,13 +62,12 @@ export declare class PaymentsService {
         };
         issuedAt: Date;
     }>;
-    handleRazorpayWebhook(rawBody: string, signature: string): Promise<{
-        status: string;
-    }>;
     private allocatePayment;
     captureOnlinePayment(input: {
         orderId?: string;
         linkId?: string;
+        qrId?: string;
+        capturedAt?: Date;
         referenceId?: string;
         gatewayPaymentId: string;
         amount: number;
@@ -77,15 +91,51 @@ export declare class PaymentsService {
         paymentLinkId: string | null;
         paymentLinkUrl: string | null;
         paymentLinkExpiresAt: Date | null;
+        gatewayQrId: string | null;
+        capturedAt: Date | null;
+        capturePropertyId: string | null;
+        capturePlatformFee: number | null;
+        gatewayRefundedAmount: number;
         razorpayOrderId: string | null;
         razorpayPaymentId: string | null;
         razorpaySignature: string | null;
         recordedBy: string | null;
     } | undefined>;
+    applyDisputedCapture(id: string, reviewerId: string, reason: string): Promise<{
+        id: string;
+        status: import("@prisma/client").$Enums.PaymentStatus;
+        mode: import("@prisma/client").$Enums.PaymentMode;
+        createdAt: Date;
+        updatedAt: Date;
+        organizationId: string;
+        notes: string | null;
+        version: number;
+        residentId: string;
+        amount: number;
+        idempotencyKey: string | null;
+        collectionDate: Date;
+        billingRecordId: string | null;
+        reference: string | null;
+        proofUrl: string | null;
+        paymentLinkId: string | null;
+        paymentLinkUrl: string | null;
+        paymentLinkExpiresAt: Date | null;
+        gatewayQrId: string | null;
+        capturedAt: Date | null;
+        capturePropertyId: string | null;
+        capturePlatformFee: number | null;
+        gatewayRefundedAmount: number;
+        razorpayOrderId: string | null;
+        razorpayPaymentId: string | null;
+        razorpaySignature: string | null;
+        recordedBy: string | null;
+    }>;
+    syncGatewayRefund(gatewayPaymentId: string): Promise<void>;
     private formatReceipt;
     findAll(orgId: string, query: QueryPaymentsDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         amountRupees: number;
         amountFormatted: string;
+        netAmountPaise: number;
         resident: {
             property: {
                 name: string;
@@ -119,6 +169,11 @@ export declare class PaymentsService {
         paymentLinkId: string | null;
         paymentLinkUrl: string | null;
         paymentLinkExpiresAt: Date | null;
+        gatewayQrId: string | null;
+        capturedAt: Date | null;
+        capturePropertyId: string | null;
+        capturePlatformFee: number | null;
+        gatewayRefundedAmount: number;
         razorpayOrderId: string | null;
         razorpayPaymentId: string | null;
         razorpaySignature: string | null;
@@ -133,6 +188,14 @@ export declare class PaymentsService {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;

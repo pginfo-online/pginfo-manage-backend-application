@@ -73,7 +73,7 @@ let JwtStrategy = class JwtStrategy extends PassportStrategy(Strategy) {
         }
         const authenticatedUser = {
             id: user.id,
-            email: user.email,
+            email: user.email ?? '',
             organizationId: payload.orgId,
             organizationRole: user.memberships[0]?.role ?? null,
             organizationAccessActive: user.memberships.length === 1,

@@ -32,6 +32,9 @@ let DashboardController = class DashboardController {
     async getMetrics(orgId, query) {
         return this.dashboardService.getMetrics(orgId, query.propertyId, query.month, query.year, query.fy === 'true');
     }
+    async getOverview(orgId, query) {
+        return this.dashboardService.getOverview(orgId, query.propertyId, query.month, query.year, query.fy === 'true');
+    }
     async getActivity(orgId, query) {
         return this.dashboardService.getActivity(orgId, query);
     }
@@ -68,6 +71,18 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], DashboardController.prototype, "getMetrics", null);
+__decorate([
+    Get('overview'),
+    ApiOperation({
+        summary: 'Get full overview payload: KPIs, property cards, pending tasks, occupancy breakdown, journey, and issues',
+    }),
+    ApiResponse({ status: 200, description: 'Overview workspace payload' }),
+    __param(0, CurrentOrgId()),
+    __param(1, Query(new ZodValidationPipe(dashboardQuerySchema))),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], DashboardController.prototype, "getOverview", null);
 __decorate([
     Get('activity'),
     ApiOperation({ summary: 'Get organization-scoped entity activity history' }),

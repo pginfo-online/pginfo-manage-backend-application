@@ -5,6 +5,8 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
 import { Module } from '@nestjs/common';
+import { FinanceModule } from '../finance/finance.module.js';
+import { AdminCollectionsService } from './application/admin-collections.service.js';
 import { AdminAccessController } from './api/admin-access.controller.js';
 import { AdminDashboardController } from './api/admin-dashboard.controller.js';
 import { AdminPlatformController } from './api/admin-platform.controller.js';
@@ -20,6 +22,7 @@ let AdminModule = class AdminModule {
 };
 AdminModule = __decorate([
     Module({
+        imports: [FinanceModule],
         controllers: [
             AdminAccessController,
             AdminDashboardController,
@@ -28,6 +31,7 @@ AdminModule = __decorate([
             AdminGovernanceController,
         ],
         providers: [
+            AdminCollectionsService,
             PlatformAdminGuard,
             AdminAuditService,
             AdminAccessService,

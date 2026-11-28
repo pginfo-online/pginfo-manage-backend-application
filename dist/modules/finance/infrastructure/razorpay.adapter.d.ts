@@ -89,7 +89,24 @@ export declare class RazorpayAdapter {
         amount: number;
         currency: string;
         status: string;
+        amount_refunded?: number;
     }>;
+    createCollectionQr(amount: number, closeBy: number, paymentId: string): Promise<{
+        id: string;
+        imageUrl: string;
+        expiresAt: Date;
+    }>;
+    private readGateway;
+    findPaymentSettlement(paymentId: string, amount: number, date: string): Promise<{
+        providerId: string;
+        bankReference: string;
+        netAmount: number;
+    } | null>;
+    fetchSubscription(id: string): Promise<{
+        id: string;
+        status: string;
+    }>;
+    hasPreviousRouteTransfer(paymentId: string): Promise<boolean>;
     private getKeyId;
     private getKeySecret;
     private getWebhookSecret;
@@ -97,7 +114,7 @@ export declare class RazorpayAdapter {
     private getBasicAuthHeader;
     private secureCompare;
     verifyPaymentSignature(orderId: string, paymentId: string, signature: string): boolean;
-    verifyWebhookSignature(rawBody: string, signature: string): boolean;
+    verifyWebhookSignature(rawBody: Buffer | string, signature: string): boolean;
     createOrder(amountPaise: number, receipt: string, notes?: Record<string, string>): Promise<RazorpayOrderResult>;
     createLinkedAccount(options: CreateLinkedAccountOptions): Promise<LinkedAccountResult>;
     fetchRouteBankVerification(accountId: string, productId: string): Promise<boolean>;

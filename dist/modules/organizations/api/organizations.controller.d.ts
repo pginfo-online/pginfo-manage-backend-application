@@ -41,7 +41,7 @@ export declare class OrganizationsController {
     getMembers(id: string, userId: string): Promise<({
         user: {
             id: string;
-            email: string;
+            email: string | null;
             mobile: string | null;
             firstName: string;
             lastName: string | null;

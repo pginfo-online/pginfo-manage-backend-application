@@ -78,8 +78,8 @@ export declare class MoneyService {
             };
         } & {
             id: string;
-            status: import("@prisma/client").$Enums.BillingStatus;
             type: import("@prisma/client").$Enums.BillingType;
+            status: import("@prisma/client").$Enums.BillingStatus;
             createdAt: Date;
             updatedAt: Date;
             organizationId: string;
@@ -104,12 +104,12 @@ export declare class MoneyService {
             createdAt: Date;
             organizationId: string;
             description: string;
+            consumedAt: Date | null;
             residentId: string;
             amount: number;
             validTill: Date;
             minimumPayment: string;
             minimumAmount: number | null;
-            consumedAt: Date | null;
         } | null;
         totalDues: number;
     }>;
@@ -118,12 +118,12 @@ export declare class MoneyService {
         createdAt: Date;
         organizationId: string;
         description: string;
+        consumedAt: Date | null;
         residentId: string;
         amount: number;
         validTill: Date;
         minimumPayment: string;
         minimumAmount: number | null;
-        consumedAt: Date | null;
     }>;
     record(dto: MoneyPayment, org: string, user: string): Promise<{
         payments: {
@@ -145,6 +145,11 @@ export declare class MoneyService {
             paymentLinkId: string | null;
             paymentLinkUrl: string | null;
             paymentLinkExpiresAt: Date | null;
+            gatewayQrId: string | null;
+            capturedAt: Date | null;
+            capturePropertyId: string | null;
+            capturePlatformFee: number | null;
+            gatewayRefundedAmount: number;
             razorpayOrderId: string | null;
             razorpayPaymentId: string | null;
             razorpaySignature: string | null;
@@ -172,6 +177,11 @@ export declare class MoneyService {
             paymentLinkId: string | null;
             paymentLinkUrl: string | null;
             paymentLinkExpiresAt: Date | null;
+            gatewayQrId: string | null;
+            capturedAt: Date | null;
+            capturePropertyId: string | null;
+            capturePlatformFee: number | null;
+            gatewayRefundedAmount: number;
             razorpayOrderId: string | null;
             razorpayPaymentId: string | null;
             razorpaySignature: string | null;

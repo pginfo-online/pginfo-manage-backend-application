@@ -58,6 +58,15 @@ export class MoneyController {
   ) {
     return this.links.create(id, org, user);
   }
+  @Post('residents/:id/payment-qr')
+  createQr(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @CurrentOrgId() org: string,
+    @CurrentUserId() user: string,
+  ) {
+    return this.links.create(id, org, user, 'qr');
+  }
+
   @Get('properties') properties(
     @CurrentOrgId() org: string,
     @Query(new ZodValidationPipe(moneyQuerySchema)) q: MoneyQuery,

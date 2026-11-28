@@ -12,6 +12,14 @@ export declare class PaymentsController {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;
@@ -36,6 +44,14 @@ export declare class PaymentsController {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;
@@ -47,6 +63,7 @@ export declare class PaymentsController {
     findAll(query: QueryPaymentsDto, orgId: string): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         amountRupees: number;
         amountFormatted: string;
+        netAmountPaise: number;
         resident: {
             property: {
                 name: string;
@@ -80,6 +97,11 @@ export declare class PaymentsController {
         paymentLinkId: string | null;
         paymentLinkUrl: string | null;
         paymentLinkExpiresAt: Date | null;
+        gatewayQrId: string | null;
+        capturedAt: Date | null;
+        capturePropertyId: string | null;
+        capturePlatformFee: number | null;
+        gatewayRefundedAmount: number;
         razorpayOrderId: string | null;
         razorpayPaymentId: string | null;
         razorpaySignature: string | null;
@@ -94,6 +116,14 @@ export declare class PaymentsController {
         mode: string;
         collectionDate: Date;
         reference: string | null;
+        refundedAmountPaise: number;
+        refundedAmountFormatted: string;
+        allocations: {
+            type: string;
+            description: string | null;
+            amountPaise: number;
+            amountFormatted: string;
+        }[];
         resident: {
             id: string;
             name: string;

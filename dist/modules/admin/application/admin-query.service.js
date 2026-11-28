@@ -7,6 +7,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
+import { paymentPropertyScope } from '../../finance/domain/collection-lines.js';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../platform/database/index.js';
@@ -71,12 +72,12 @@ let AdminQueryService = class AdminQueryService {
                     status: 'CONFIRMED',
                     collectionDate: { gte: from, lte: to },
                 },
-                _sum: { amount: true },
+                _sum: { amount: true, gatewayRefundedAmount: true },
                 _count: true,
             }),
             this.prisma.payment.aggregate({
                 where: { ...organization, status: 'PENDING' },
-                _sum: { amount: true },
+                _sum: { amount: true, gatewayRefundedAmount: true },
                 _count: true,
             }),
             this.prisma.payment.count({
@@ -141,7 +142,8 @@ let AdminQueryService = class AdminQueryService {
             inventory: { rooms: totalRooms, bedsByStatus: bedStatuses },
             residents: { byStatus: residentStatuses },
             finance: {
-                collectedPaise: paymentTotals._sum.amount ?? 0,
+                collectedPaise: (paymentTotals._sum.amount ?? 0) -
+                    (paymentTotals._sum.gatewayRefundedAmount ?? 0),
                 collections: paymentTotals._count,
                 pendingPaise: pendingPaymentTotals._sum.amount ?? 0,
                 pendingPayments: pendingPaymentTotals._count,
@@ -219,7 +221,7 @@ let AdminQueryService = class AdminQueryService {
         ) grouped), '{}'::jsonb) AS case_statuses
       FROM (
         SELECT
-          coalesce(sum("amount") FILTER (WHERE "status" = 'CONFIRMED'), 0) AS collected_paise,
+          coalesce(sum("amount" - "gateway_refunded_amount") FILTER (WHERE "status" = 'CONFIRMED'), 0) AS collected_paise,
           count(*) FILTER (WHERE "status" = 'CONFIRMED') AS collections,
           coalesce(sum("amount") FILTER (WHERE "status" = 'PENDING'), 0) AS pending_paise,
           count(*) FILTER (WHERE "status" = 'PENDING') AS pending_payments,
@@ -452,7 +454,7 @@ let AdminQueryService = class AdminQueryService {
             }),
             this.prisma.payment.aggregate({
                 where: { organizationId: id, status: 'CONFIRMED' },
-                _sum: { amount: true },
+                _sum: { amount: true, gatewayRefundedAmount: true },
             }),
             this.prisma.billingRecord.aggregate({
                 where: {
@@ -466,7 +468,8 @@ let AdminQueryService = class AdminQueryService {
             ...organization,
             metrics: {
                 activeResidents: residents,
-                collectedPaise: collections._sum.amount ?? 0,
+                collectedPaise: (collections._sum.amount ?? 0) -
+                    (collections._sum.gatewayRefundedAmount ?? 0),
                 outstandingPaise: Math.max(0, (outstanding._sum.amount ?? 0) - (outstanding._sum.paidAmount ?? 0)),
             },
         };
@@ -543,8 +546,8 @@ let AdminQueryService = class AdminQueryService {
                 },
             }),
             this.prisma.payment.aggregate({
-                where: { resident: { propertyId: id }, status: 'CONFIRMED' },
-                _sum: { amount: true },
+                where: { ...paymentPropertyScope(id), status: 'CONFIRMED' },
+                _sum: { amount: true, gatewayRefundedAmount: true },
             }),
             this.prisma.expense.aggregate({
                 where: { propertyId: id },
@@ -559,7 +562,8 @@ let AdminQueryService = class AdminQueryService {
             metrics: {
                 bedsByStatus: beds,
                 activeResidents,
-                collectedPaise: collections._sum.amount ?? 0,
+                collectedPaise: (collections._sum.amount ?? 0) -
+                    (collections._sum.gatewayRefundedAmount ?? 0),
                 expensesPaise: expenses._sum.amount ?? 0,
                 openComplaints,
             },
@@ -1013,7 +1017,7 @@ let AdminQueryService = class AdminQueryService {
                 }
                 : {}),
         };
-        const [items, total, totals] = await this.prisma.$transaction([
+        const [items, total, paidInvoices, historicalTransfers] = await this.prisma.$transaction([
             this.prisma.rentInvoice.findMany({
                 where,
                 skip: (query.page - 1) * query.limit,
@@ -1042,16 +1046,20 @@ let AdminQueryService = class AdminQueryService {
             }),
             this.prisma.rentInvoice.count({ where }),
             this.prisma.rentInvoice.aggregate({
-                where: { ...where, status: { not: 'CANCELLED' } },
-                _sum: { amount: true, platformFee: true, transferAmount: true },
+                where: { ...where, status: 'PAID', collectionType: 'AUTOPAY' },
+                _sum: { amount: true, platformFee: true },
+            }),
+            this.prisma.rentInvoice.aggregate({
+                where: { ...where, razorpayTransferId: { not: null } },
+                _sum: { transferAmount: true },
             }),
         ]);
         return {
             ...buildOffsetResponse(items, total, query.page, query.limit),
             totals: {
-                grossPaise: totals._sum.amount ?? 0,
-                platformFeesPaise: totals._sum.platformFee ?? 0,
-                ownerTransfersPaise: totals._sum.transferAmount ?? 0,
+                grossPaise: paidInvoices._sum.amount ?? 0,
+                platformFeesPaise: paidInvoices._sum.platformFee ?? 0,
+                ownerTransfersPaise: historicalTransfers._sum.transferAmount ?? 0,
             },
         };
     }
@@ -1114,7 +1122,7 @@ let AdminQueryService = class AdminQueryService {
             this.prisma.payment.aggregate({
                 where: { ...organization, status: { in: ['PENDING', 'DISPUTED'] } },
                 _count: true,
-                _sum: { amount: true },
+                _sum: { amount: true, gatewayRefundedAmount: true },
             }),
         ]);
         return {
@@ -1204,7 +1212,7 @@ let AdminQueryService = class AdminQueryService {
                     status: 'CONFIRMED',
                     collectionDate: { gte: from, lte: to },
                 },
-                _sum: { amount: true },
+                _sum: { amount: true, gatewayRefundedAmount: true },
                 _count: true,
             }),
             this.prisma.expense.groupBy({
@@ -1254,7 +1262,8 @@ let AdminQueryService = class AdminQueryService {
                     properties: propertiesByOrg.get(id)?._count ?? 0,
                     residents: residentsByOrg.get(id)?._count ?? 0,
                     collections: collection?._count ?? 0,
-                    collectedPaise: collection?._sum.amount ?? 0,
+                    collectedPaise: (collection?._sum.amount ?? 0) -
+                        (collection?._sum.gatewayRefundedAmount ?? 0),
                     expensesPaise: expense?._sum.amount ?? 0,
                     outstandingPaise: Math.max(0, (due?._sum.amount ?? 0) - (due?._sum.paidAmount ?? 0)),
                 };

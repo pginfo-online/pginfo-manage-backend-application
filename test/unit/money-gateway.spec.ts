@@ -14,6 +14,7 @@ describe('Money gateway safety', () => {
           organizationId: 'org',
           residentId: 'resident',
         }),
+        findUnique: vi.fn().mockResolvedValue(null),
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'payment',
           amount: 100,
@@ -47,7 +48,7 @@ describe('Money gateway safety', () => {
     ).toBeUndefined();
     expect(db.payment.findFirst).not.toHaveBeenCalled();
   });
-  it('rejects amount and currency mismatches before touching the ledger', async () => {
+  it('records a true INR amount mismatch for reconciliation', async () => {
     await expect(
       payments.captureOnlinePayment({
         orderId: 'order_1',
@@ -55,7 +56,9 @@ describe('Money gateway safety', () => {
         amount: 101,
         currency: 'INR',
       }),
-    ).rejects.toThrow('does not match');
+    ).resolves.toMatchObject({ status: 'DISPUTED', amount: 101 });
+  });
+  it('rejects unsupported currency before touching the ledger', async () => {
     await expect(
       payments.captureOnlinePayment({
         orderId: 'order_1',
@@ -83,7 +86,7 @@ describe('Money gateway safety', () => {
     );
   });
   it('does not allocate an already confirmed capture a second time', async () => {
-    db.payment.findUniqueOrThrow.mockResolvedValue({
+    db.payment.findUnique.mockResolvedValue({
       id: 'payment',
       status: 'CONFIRMED',
       razorpayPaymentId: 'pay_1',
@@ -109,9 +112,11 @@ describe('Money gateway safety', () => {
       amount: 100,
       currency: 'INR',
     });
-    expect(db.payment.findFirst).toHaveBeenCalledWith({
-      where: { OR: [{ paymentLinkId: 'plink_1' }] },
-    });
+    expect(db.payment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { mode: 'RAZORPAY', OR: [{ paymentLinkId: 'plink_1' }] },
+      }),
+    );
   });
 });
 
@@ -120,6 +125,7 @@ describe('Expiring Money payment links', () => {
     const money = {
       paymentContext: vi.fn().mockResolvedValue({
         totalDues: 100,
+        bills: [{ propertyId: 'property' }],
         resident: { property: { name: 'Fixture' } },
       }),
     };
@@ -169,6 +175,7 @@ describe('Expiring Money payment links', () => {
     const money = {
       paymentContext: vi.fn().mockResolvedValue({
         totalDues: 100,
+        bills: [{ propertyId: 'property' }],
         resident: {
           firstName: 'Fixture',
           mobile: '9999999999',
@@ -196,8 +203,7 @@ describe('Authoritative Money link webhook routing', () => {
     const db: any = {
       webhookEvent: {
         findUnique: vi.fn().mockResolvedValue({ status: 'FAILED' }),
-        update: vi.fn(),
-        create: vi.fn(),
+        upsert: vi.fn(),
       },
     };
     const payments = { captureOnlinePayment: vi.fn() };
@@ -205,7 +211,6 @@ describe('Authoritative Money link webhook routing', () => {
       db,
       { verifyWebhookSignature: () => true } as any,
       { get: () => 3000 } as any,
-      undefined,
       undefined,
       payments as any,
     );
@@ -233,10 +238,11 @@ describe('Authoritative Money link webhook routing', () => {
       gatewayPaymentId: 'pay_1',
       amount: 100,
       currency: 'INR',
+      capturedAt: expect.any(Date),
     });
-    expect(db.webhookEvent.update).toHaveBeenCalledWith(
+    expect(db.webhookEvent.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'SUCCESS', error: null }),
+        update: expect.objectContaining({ status: 'SUCCESS', error: null }),
       }),
     );
   });

@@ -107,7 +107,7 @@ let TokenService = TokenService_1 = class TokenService {
         });
         const accessToken = await this.generateAccessToken({
             id: existingToken.user.id,
-            email: existingToken.user.email,
+            email: existingToken.user.email ?? '',
             orgId: primaryMembership ? primaryMembership.organizationId : null,
             orgRole: primaryMembership ? primaryMembership.role : null,
         });

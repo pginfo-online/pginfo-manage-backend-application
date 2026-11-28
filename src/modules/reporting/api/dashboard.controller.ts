@@ -81,6 +81,26 @@ export class DashboardController {
     );
   }
 
+  @Get('overview')
+  @ApiOperation({
+    summary:
+      'Get full overview payload: KPIs, property cards, pending tasks, occupancy breakdown, journey, and issues',
+  })
+  @ApiResponse({ status: 200, description: 'Overview workspace payload' })
+  async getOverview(
+    @CurrentOrgId() orgId: string,
+    @Query(new ZodValidationPipe(dashboardQuerySchema))
+    query: DashboardQueryDto,
+  ) {
+    return this.dashboardService.getOverview(
+      orgId,
+      query.propertyId,
+      query.month,
+      query.year,
+      query.fy === 'true',
+    );
+  }
+
   @Get('activity')
   @ApiOperation({ summary: 'Get organization-scoped entity activity history' })
   async getActivity(

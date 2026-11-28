@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BankAccountCipher } from './infrastructure/bank-account-cipher.js';
 import { BillingController } from './api/billing.controller.js';
 import { PaymentsController } from './api/payments.controller.js';
 import { PayoutsController } from './api/payouts.controller.js';
@@ -29,6 +30,7 @@ import { MoneyLinksService } from './application/money-links.service.js';
     RazorpayWebhookController,
   ],
   providers: [
+    BankAccountCipher,
     MoneyLinksService,
     MoneyService,
     BillingService,
@@ -40,6 +42,7 @@ import { MoneyLinksService } from './application/money-links.service.js';
     RazorpayAdapter,
   ],
   exports: [
+    BankAccountCipher,
     BillingService,
     PaymentsService,
     PayoutsService,

@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { RazorpayWebhookService } from '../../src/modules/finance/application/razorpay-webhook.service.js';
 
-describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', () => {
+describe('RazorpayWebhookService (Autopay webhook and collection ledger)', () => {
   let service: RazorpayWebhookService;
   let mockPrisma: any;
   let mockRazorpayAdapter: any;
   let mockConfig: any;
   let mockWhatsAppAdapter: any;
-  let mockEmailAdapter: any;
   let mockMoneyLinks: any;
 
   const orgId = '00000000-0000-0000-0000-000000000001';
@@ -20,7 +19,9 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     mockPrisma = {
       webhookEvent: {
         findUnique: vi.fn().mockResolvedValue(null),
-        create: vi.fn().mockResolvedValue({ id: 'evt-rec-1' }),
+        upsert: vi.fn().mockResolvedValue({ id: 'evt-rec-1' }),
+        createMany: vi.fn(),
+        updateMany: vi.fn(),
       },
       tenantMandate: {
         findUnique: vi.fn().mockResolvedValue({
@@ -53,9 +54,13 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
           },
         }),
         update: vi.fn().mockResolvedValue({ id: mandateId, status: 'ACTIVE' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       rentInvoice: {
         findUnique: vi.fn().mockResolvedValue(null),
+        create: vi
+          .fn()
+          .mockResolvedValue({ id: 'inv-1', status: 'FAILED', retryCount: 1 }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         upsert: vi.fn().mockResolvedValue({
           id: 'inv-1',
@@ -108,16 +113,11 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       send: vi.fn().mockResolvedValue({ success: true, messageId: 'wa_ok' }),
     };
 
-    mockEmailAdapter = {
-      send: vi.fn().mockResolvedValue({ success: true }),
-    };
-
     service = new RazorpayWebhookService(
       mockPrisma as any,
       mockRazorpayAdapter as any,
       mockConfig as any,
       mockWhatsAppAdapter as any,
-      mockEmailAdapter as any,
       undefined,
       mockMoneyLinks,
     );
@@ -153,7 +153,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     expect(mockRazorpayAdapter.transferPayment).not.toHaveBeenCalled();
   });
 
-  it('should handle subscription.authenticated: activate mandate and store references', async () => {
+  it('records authorization and stores mandate references', async () => {
     const rawPayload = JSON.stringify({
       id: 'evt_auth_1',
       event: 'subscription.authenticated',
@@ -181,10 +181,10 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     expect(result.received).toBe(true);
     expect(result.event).toBe('subscription.authenticated');
 
-    expect(mockPrisma.tenantMandate.update).toHaveBeenCalledWith({
-      where: { id: mandateId },
+    expect(mockPrisma.tenantMandate.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: mandateId }),
       data: expect.objectContaining({
-        status: 'ACTIVE',
+        status: 'AUTHENTICATED',
         razorpayCustomerId: 'cust_abc_1',
         razorpayTokenId: 'token_xyz_1',
         bankReference: 'bank_ref_9999',
@@ -193,7 +193,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     });
   });
 
-  it('should handle subscription.charged: route transfer (amount - platform_fee) to landlord & mark invoice PAID', async () => {
+  it('records subscription funds and marks rent paid without an automatic transfer', async () => {
     mockPrisma.billingRecord.findFirst.mockResolvedValue({
       id: 'bill-1',
       amount: 2500000,
@@ -216,6 +216,7 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
             id: 'pay_charged_555',
             amount: 2500000, // ₹25,000
             status: 'captured',
+            currency: 'INR',
             subscription_id: 'sub_test_123',
           },
         },
@@ -239,16 +240,14 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       }),
     );
 
-    // Verify Razorpay Route transfer
-    expect(mockRazorpayAdapter.transferPayment).toHaveBeenCalledWith(
-      'pay_charged_555',
-      {
-        account: landlordAccountId,
-        amount: 2497000, // exact split
-        currency: 'INR',
-        notes: expect.any(Object),
-      },
-    );
+    expect(mockRazorpayAdapter.transferPayment).not.toHaveBeenCalled();
+    expect(mockPrisma.payment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        capturePlatformFee: 3000,
+        capturePropertyId: propertyId,
+        allocations: { create: { billingRecordId: 'bill-1', amount: 2500000 } },
+      }),
+    });
 
     // Verify notification sent
     expect(mockWhatsAppAdapter.send).toHaveBeenCalled();
@@ -272,6 +271,8 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
               id: 'pay_overpaid',
               subscription_id: 'sub_test_123',
               amount: 2500000,
+              currency: 'INR',
+              status: 'captured',
             },
           },
         },
@@ -295,6 +296,8 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
         payment: {
           entity: {
             id: 'pay_replayed',
+            currency: 'INR',
+            status: 'captured',
             subscription_id: 'sub_test_123',
             amount: 2500000,
           },
@@ -324,25 +327,24 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       },
     });
 
-    mockPrisma.rentInvoice.upsert.mockResolvedValue({
-      id: 'inv-1',
-      status: 'FAILED',
-    });
     const result = await service.handleWebhook(rawPayload, 'valid_sig');
     expect(result.received).toBe(true);
 
     expect(mockMoneyLinks.create).toHaveBeenCalledWith(tenantId, orgId);
 
-    // Verify invoice updated with status FAILED and retryCount
-    expect(mockPrisma.rentInvoice.upsert).toHaveBeenCalledWith(
+    expect(mockPrisma.rentInvoice.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        create: expect.objectContaining({
+        data: expect.objectContaining({
           status: 'FAILED',
           collectionType: 'FALLBACK_LINK',
-          retryCount: 0,
+          retryCount: 1,
           failureReason: 'Insufficient funds in customer bank account',
-          fallbackPaymentUrl: 'https://rzp.io/i/fallback_instant',
         }),
+      }),
+    );
+    expect(mockPrisma.rentInvoice.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { fallbackPaymentUrl: 'https://rzp.io/i/fallback_instant' },
       }),
     );
 
@@ -372,8 +374,8 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
     const result = await service.handleWebhook(rawPayload, 'valid_sig');
     expect(result.received).toBe(true);
 
-    expect(mockPrisma.tenantMandate.update).toHaveBeenCalledWith({
-      where: { id: mandateId },
+    expect(mockPrisma.tenantMandate.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: mandateId }),
       data: expect.objectContaining({
         status: 'REVOKED',
         collectionMode: 'MANUAL_COLLECTION',
@@ -381,12 +383,11 @@ describe('RazorpayWebhookService (Autopay Webhook Engine & Route Transfers)', ()
       }),
     });
 
-    // Verify landlord was alerted
-    expect(mockWhatsAppAdapter.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        to: '9123456789',
-        message: expect.stringContaining('MANUAL_COLLECTION'),
+    expect(mockPrisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'rent.mandate_status_changed',
+        entityId: mandateId,
       }),
-    );
+    });
   });
 });

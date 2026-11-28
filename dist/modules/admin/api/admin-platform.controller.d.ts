@@ -38,7 +38,7 @@ export declare class AdminPlatformController {
         members: {
             user: {
                 id: string;
-                email: string;
+                email: string | null;
                 mobile: string | null;
                 firstName: string;
                 lastName: string | null;
@@ -76,8 +76,8 @@ export declare class AdminPlatformController {
         };
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -122,8 +122,8 @@ export declare class AdminPlatformController {
             bookings: number;
         };
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -145,8 +145,8 @@ export declare class AdminPlatformController {
     }>;
     updatePropertyStatus(id: string, dto: UpdatePropertyStatusDto, actor: PlatformAdminContext, request: Request): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;

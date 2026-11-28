@@ -5,16 +5,8 @@ export declare class RazorpayWebhookController {
     constructor(razorpayWebhookService: RazorpayWebhookService);
     handleWebhook(signature: string, req: Request, eventId?: string): Promise<{
         status: string;
-        message: string;
-        eventId?: undefined;
-        processedAt?: undefined;
-        received?: undefined;
-        event?: undefined;
-    } | {
-        status: string;
         eventId: string;
         processedAt: Date;
-        message?: undefined;
         received?: undefined;
         event?: undefined;
     } | {
@@ -22,7 +14,6 @@ export declare class RazorpayWebhookController {
         event: string;
         eventId: string;
         status?: undefined;
-        message?: undefined;
         processedAt?: undefined;
     }>;
 }

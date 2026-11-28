@@ -46,7 +46,7 @@ export declare class OrganizationsService {
     getMembers(orgId: string, userId: string): Promise<({
         user: {
             id: string;
-            email: string;
+            email: string | null;
             mobile: string | null;
             firstName: string;
             lastName: string | null;

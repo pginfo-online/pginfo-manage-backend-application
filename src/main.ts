@@ -1,12 +1,15 @@
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { GlobalExceptionFilter } from './common/errors/index.js';
+import type { EnvConfig } from './config/index.js';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bufferLogs: true, // Buffer logs until Pino logger is attached
     rawBody: true, // Retain exact raw unparsed request bytes for webhook HMAC verification
   });
@@ -18,24 +21,14 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // ── CORS ─────────────────────────────────────────────────
-  const defaultCorsOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:5000',
-    'http://localhost:5173',
-    'https://app.pginfo.business',
-    'https://api.pginfo.business',
-  ];
-  const parsedOrigins = (process.env['CORS_ORIGINS'] ?? '')
-    .split(',')
-    .map((origin) => origin.trim().replace(/\/$/, ''))
-    .filter(Boolean);
-  const corsOrigins =
-    parsedOrigins.length > 0 ? parsedOrigins : defaultCorsOrigins;
+  const config = app.get<ConfigService<EnvConfig, true>>(ConfigService);
+  const trustedProxies = config.get('TRUSTED_PROXY_IPS');
+  if (trustedProxies.length) app.set('trust proxy', trustedProxies);
 
   app.enableCors({
-    origin: corsOrigins,
+    origin: config.get('CORS_ORIGINS'),
     credentials: true,
+    maxAge: 600,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
@@ -93,8 +86,8 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   // ── Start ────────────────────────────────────────────────
-  const port = Number(process.env['PORT'] ?? 3000);
-  await app.listen(port, '0.0.0.0');
+  const port = config.get('PORT');
+  await app.listen(port, config.get('LISTEN_HOST'));
 
   const logger = app.get(Logger);
   logger.log(`🏠 PgInfo API listening on port ${port}/${apiPrefix}`);

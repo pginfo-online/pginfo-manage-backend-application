@@ -20,9 +20,9 @@ datasource db {
 
 model User {
   id             String    @id @default(uuid()) @db.Uuid
-  email          String    @unique
+  email          String?   @unique
   mobile         String?   @unique
-  passwordHash   String    @map("password_hash")
+  passwordHash   String?   @map("password_hash")
   firstName      String    @map("first_name")
   lastName       String?   @map("last_name")
   emailVerified  Boolean   @default(false) @map("email_verified")
@@ -44,6 +44,34 @@ model User {
   platformSettingsUpdated PlatformSetting[]       @relation("PlatformSettingUpdater")
 
   @@map("users")
+}
+
+enum OtpPurpose {
+  LOGIN
+  REGISTER
+
+  @@map("otp_purpose")
+}
+
+model OtpVerification {
+  id                String     @id @default(uuid()) @db.Uuid
+  mobile            String     @db.VarChar(15)
+  purpose           OtpPurpose
+  otpHash           String     @map("otp_hash")
+  salt              String     @db.VarChar(64)
+  attempts          Int        @default(0)
+  maxAttempts       Int        @default(5) @map("max_attempts")
+  expiresAt         DateTime   @map("expires_at") @db.Timestamptz
+  consumedAt        DateTime?  @map("consumed_at") @db.Timestamptz
+  invalidatedAt     DateTime?  @map("invalidated_at") @db.Timestamptz
+  providerMessageId String?    @map("provider_message_id")
+  ipAddress         String?    @map("ip_address") @db.Inet
+  userAgent         String?    @map("user_agent")
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([mobile, purpose, createdAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("otp_verifications")
 }
 
 enum PlatformRole {
@@ -470,8 +498,8 @@ model Resident {
   noticePeriodDays      Int?           @map("notice_period_days")
   agreementPeriodMonths Int?           @map("agreement_period_months")
   monthlyRent           Int            @map("monthly_rent") // paise
-  rentalFrequencyMonths Int @default(1) @map("rental_frequency_months")
-  skipFirstRent Boolean @default(false) @map("skip_first_rent")
+  rentalFrequencyMonths Int            @default(1) @map("rental_frequency_months")
+  skipFirstRent         Boolean        @default(false) @map("skip_first_rent")
   securityDeposit       Int            @default(0) @map("security_deposit") // paise
   joiningDate           DateTime       @map("joining_date") @db.Date
   moveInDate            DateTime?      @map("move_in_date") @db.Date
@@ -694,9 +722,16 @@ model Payment {
   paymentLinkExpiresAt DateTime?     @map("payment_link_expires_at") @db.Timestamptz
 
   // Razorpay-specific
-  razorpayOrderId   String? @unique @map("razorpay_order_id")
-  razorpayPaymentId String? @unique @map("razorpay_payment_id")
-  razorpaySignature String? @map("razorpay_signature")
+  gatewayQrId           String?            @unique @map("gateway_qr_id")
+  capturedAt            DateTime?          @map("captured_at") @db.Timestamptz
+  capturePropertyId     String?            @map("capture_property_id") @db.Uuid
+  capturePlatformFee    Int?               @map("capture_platform_fee")
+  gatewayRefundedAmount Int                @default(0) @map("gateway_refunded_amount")
+  settlement            GatewaySettlement?
+  manualPayout          ManualPayout?
+  razorpayOrderId       String?            @unique @map("razorpay_order_id")
+  razorpayPaymentId     String?            @unique @map("razorpay_payment_id")
+  razorpaySignature     String?            @map("razorpay_signature")
 
   // Audit
   recordedBy     String? @map("recorded_by") @db.Uuid // User who recorded offline payment
@@ -718,10 +753,45 @@ model Payment {
   @@map("payments")
 }
 
+model GatewaySettlement {
+  paymentId     String   @id @map("payment_id") @db.Uuid
+  providerId    String   @map("provider_id")
+  bankReference String   @map("bank_reference")
+  netAmount     Int      @map("net_amount")
+  routeClear    Boolean  @default(false) @map("route_clear")
+  settledOn     DateTime @map("settled_on") @db.Date
+  recordedBy    String   @map("recorded_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  payment       Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([providerId])
+  @@map("gateway_settlements")
+}
+
+model ManualPayout {
+  paymentId       String                @id @map("payment_id") @db.Uuid
+  payoutAccountId String                @map("payout_account_id") @db.Uuid
+  amount          Int
+  bankReference   String?               @unique @map("bank_reference")
+  paidOn          DateTime?             @map("paid_on") @db.Date
+  recordedBy      String?               @map("recorded_by") @db.Uuid
+  preparedBy      String                @map("prepared_by") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  beneficiaryName String                @map("beneficiary_name")
+  accountMasked   String                @map("account_masked")
+  ifscCode        String                @map("ifsc_code")
+  payment         Payment               @relation(fields: [paymentId], references: [id])
+  payoutAccount   LandlordPayoutAccount @relation(fields: [payoutAccountId], references: [id])
+
+  @@index([payoutAccountId])
+  @@map("manual_payouts")
+}
+
 model PaymentAllocation {
   paymentId       String        @map("payment_id") @db.Uuid
   billingRecordId String        @map("billing_record_id") @db.Uuid
   amount          Int
+  refundedAmount  Int           @default(0) @map("refunded_amount")
   payment         Payment       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   billingRecord   BillingRecord @relation(fields: [billingRecordId], references: [id])
 
@@ -1215,29 +1285,31 @@ enum RentCollectionType {
 }
 
 model LandlordPayoutAccount {
-  id                  String              @id @default(uuid()) @db.Uuid
-  organizationId      String              @map("organization_id") @db.Uuid
-  userId              String              @map("user_id") @db.Uuid
-  propertyId          String?             @map("property_id") @db.Uuid
-  razorpayAccountId   String              @unique @map("razorpay_account_id") // acc_xxxx
-  businessName        String              @map("business_name")
-  businessType        String              @default("individual") @map("business_type")
-  accountNumberMasked String              @map("account_number_masked")
-  ifscCode            String              @map("ifsc_code")
-  beneficiaryName     String              @map("beneficiary_name")
-  email               String
-  phone               String
-  status              PayoutAccountStatus @default(ACTIVE)
-  kycStatus           KycStatus           @default(VERIFIED) @map("kyc_status")
-  metadata            Json?
-  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+  id                     String              @id @default(uuid()) @db.Uuid
+  organizationId         String              @map("organization_id") @db.Uuid
+  userId                 String              @map("user_id") @db.Uuid
+  propertyId             String?             @map("property_id") @db.Uuid
+  razorpayAccountId      String              @unique @map("razorpay_account_id") // acc_xxxx
+  businessName           String              @map("business_name")
+  businessType           String              @default("individual") @map("business_type")
+  accountNumberMasked    String              @map("account_number_masked")
+  accountNumberEncrypted String?             @map("account_number_encrypted")
+  ifscCode               String              @map("ifsc_code")
+  beneficiaryName        String              @map("beneficiary_name")
+  email                  String
+  phone                  String
+  status                 PayoutAccountStatus @default(ACTIVE)
+  kycStatus              KycStatus           @default(VERIFIED) @map("kyc_status")
+  metadata               Json?
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz
 
   // Relations
-  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  property     Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  mandates     TenantMandate[]
+  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property      Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  mandates      TenantMandate[]
+  manualPayouts ManualPayout[]
 
   @@index([organizationId])
   @@index([userId])
@@ -1271,6 +1343,7 @@ model TenantMandate {
   failureReason           String?               @map("failure_reason")
   retryCount              Int                   @default(0) @map("retry_count")
   startedAt               DateTime?             @map("started_at") @db.Timestamptz
+  gatewayStatusAt         DateTime?             @map("gateway_status_at") @db.Timestamptz
   nextChargeDate          DateTime?             @map("next_charge_date") @db.Timestamptz
   cancelledAt             DateTime?             @map("cancelled_at") @db.Timestamptz
   metadata                Json?

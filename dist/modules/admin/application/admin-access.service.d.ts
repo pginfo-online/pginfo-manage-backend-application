@@ -12,7 +12,7 @@ export declare class AdminAccessService {
         permissions: ("dashboard.read" | "users.read" | "users.write" | "organizations.read" | "organizations.write" | "properties.read" | "properties.write" | "inventory.read" | "inventory.write" | "residents.read" | "bookings.read" | "finance.read" | "finance.review" | "banks.read" | "banks.review" | "reports.read" | "audit.read" | "support.read" | "support.write" | "settings.read" | "settings.write" | "admins.manage")[];
         user: {
             id: string;
-            email: string;
+            email: string | null;
             mobile: string | null;
             firstName: string;
             lastName: string | null;
@@ -30,7 +30,7 @@ export declare class AdminAccessService {
     list(query: AdminListQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
             isActive: boolean;
@@ -49,7 +49,7 @@ export declare class AdminAccessService {
     create(dto: CreatePlatformAdminDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
@@ -66,7 +66,7 @@ export declare class AdminAccessService {
     update(id: string, dto: UpdatePlatformAdminDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
         };
     } & {
@@ -81,7 +81,7 @@ export declare class AdminAccessService {
     }>;
     updateUserStatus(id: string, dto: UpdateUserStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         id: string;
-        email: string;
+        email: string | null;
         firstName: string;
         lastName: string | null;
         isActive: boolean;

@@ -1,15 +1,13 @@
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
-import { PayoutsService } from './payouts.service.js';
 import { type WhatsAppAdapter } from '../../communications/domain/notification.interfaces.js';
 import type { CreateMandateDto, QueryMandatesDto } from '../api/dto/mandate.dto.js';
 export declare class MandatesService {
     private readonly prisma;
     private readonly razorpayAdapter;
-    private readonly payoutsService;
     private readonly whatsappAdapter?;
     private readonly logger;
-    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter, payoutsService: PayoutsService, whatsappAdapter?: WhatsAppAdapter | undefined);
+    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter, whatsappAdapter?: WhatsAppAdapter | undefined);
     createMandate(dto: CreateMandateDto, orgId: string, userId: string): Promise<{
         mandateId: string;
         subscriptionId: string;
@@ -52,8 +50,8 @@ export declare class MandatesService {
         landlordPayoutAccount: {
             id: string;
             businessName: string;
-            razorpayAccountId: string;
             beneficiaryName: string;
+            razorpayAccountId: string;
         } | null;
         unit: {
             id: string;
@@ -122,6 +120,7 @@ export declare class MandatesService {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>;
@@ -168,6 +167,7 @@ export declare class MandatesService {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>>;
@@ -199,6 +199,7 @@ export declare class MandatesService {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>;

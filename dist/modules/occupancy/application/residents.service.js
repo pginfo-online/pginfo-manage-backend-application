@@ -270,12 +270,42 @@ let ResidentsService = ResidentsService_1 = class ResidentsService {
         });
     }
     async findAll(orgId, query) {
+        const presetStart = (preset) => {
+            if (!preset || preset === 'ALL')
+                return undefined;
+            const now = new Date();
+            if (preset === 'LAST_7_DAYS') {
+                return new Date(now.getTime() - 7 * 86400000);
+            }
+            if (preset === 'LAST_30_DAYS') {
+                return new Date(now.getTime() - 30 * 86400000);
+            }
+            if (preset === 'THIS_MONTH') {
+                return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+            }
+            return undefined;
+        };
+        const moveInStart = presetStart(query.moveInPreset);
+        const createdAtStart = presetStart(query.createdAtPreset);
+        const statusFilter = query.status
+            ? { status: query.status }
+            : query.evictionStatus === 'ON_NOTICE'
+                ? { status: 'NOTICE_PERIOD' }
+                : query.evictionStatus === 'ACTIVE_STAY'
+                    ? { status: 'ACTIVE' }
+                    : { status: { not: 'ARCHIVED' } };
+        const kycFilter = query.kycStatus === 'UPLOADED'
+            ? { idProofUrl: { not: null } }
+            : query.kycStatus === 'PENDING'
+                ? { idProofUrl: null }
+                : {};
         const where = {
             organizationId: orgId,
             ...(query.propertyId ? { propertyId: query.propertyId } : {}),
-            ...(query.status
-                ? { status: query.status }
-                : { status: { not: 'ARCHIVED' } }),
+            ...statusFilter,
+            ...kycFilter,
+            ...(moveInStart ? { moveInDate: { gte: moveInStart } } : {}),
+            ...(createdAtStart ? { createdAt: { gte: createdAtStart } } : {}),
             AND: query.search?.split(/\s+/).map((term) => ({
                 OR: [
                     { firstName: { contains: term, mode: 'insensitive' } },
@@ -285,13 +315,25 @@ let ResidentsService = ResidentsService_1 = class ResidentsService {
                 ],
             })),
         };
+        const dir = query.sortOrder === 'asc' ? 'asc' : 'desc';
+        const orderBy = query.sortBy === 'name'
+            ? [{ firstName: dir }, { lastName: dir }, { id: 'asc' }]
+            : query.sortBy === 'room'
+                ? [{ room: { roomNumber: dir } }, { id: 'asc' }]
+                : query.sortBy === 'rent'
+                    ? [{ monthlyRent: dir }, { id: 'asc' }]
+                    : query.sortBy === 'checkOutDate'
+                        ? [{ expectedVacatingDate: dir }, { moveOutDate: dir }, { id: 'asc' }]
+                        : query.sortBy === 'status'
+                            ? [{ status: dir }, { id: 'asc' }]
+                            : [{ createdAt: dir }, { id: 'desc' }];
         const [total, residents] = await Promise.all([
             this.prisma.resident.count({ where }),
             this.prisma.resident.findMany({
                 where,
                 skip: (query.page - 1) * query.limit,
                 take: query.limit,
-                orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                orderBy,
                 include: {
                     mandates: {
                         where: {
@@ -352,6 +394,9 @@ let ResidentsService = ResidentsService_1 = class ResidentsService {
                 isOverdue: overdueSet.has(r.id),
             };
         });
+        if (query.sortBy === 'dues') {
+            formatted.sort((a, b) => dir === 'asc' ? a.dues - b.dues : b.dues - a.dues);
+        }
         return buildOffsetResponse(formatted, total, query.page, query.limit);
     }
     async findById(id, orgId) {
@@ -752,11 +797,11 @@ let ResidentsService = ResidentsService_1 = class ResidentsService {
         return updated;
     }
     async requireAutopayCancelled(tx, orgId, residentId, action) {
+        await tx.$queryRaw `SELECT id FROM residents WHERE id=${residentId}::uuid FOR UPDATE`;
         const mandate = await tx.tenantMandate.findFirst({
             where: {
                 organizationId: orgId,
                 tenantId: residentId,
-                collectionMode: 'AUTOPAY',
                 status: {
                     in: ['CREATED', 'AUTHENTICATED', 'ACTIVE', 'PENDING', 'PAUSED'],
                 },

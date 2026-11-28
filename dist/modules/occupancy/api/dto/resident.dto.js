@@ -174,6 +174,18 @@ export const moveOutSchema = z.object({
 export const queryResidentsSchema = z.object({
     propertyId: z.string().uuid().optional(),
     status: z.nativeEnum(ResidentStatus).optional(),
+    kycStatus: z.enum(['ALL', 'UPLOADED', 'PENDING']).optional(),
+    evictionStatus: z.enum(['ALL', 'ON_NOTICE', 'ACTIVE_STAY']).optional(),
+    moveInPreset: z
+        .enum(['ALL', 'LAST_7_DAYS', 'LAST_30_DAYS', 'THIS_MONTH'])
+        .optional(),
+    createdAtPreset: z
+        .enum(['ALL', 'LAST_7_DAYS', 'LAST_30_DAYS', 'THIS_MONTH'])
+        .optional(),
+    sortBy: z
+        .enum(['name', 'room', 'rent', 'checkOutDate', 'status', 'createdAt', 'dues'])
+        .optional(),
+    sortOrder: z.enum(['asc', 'desc']).default('desc'),
     search: z.string().trim().max(120).optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),

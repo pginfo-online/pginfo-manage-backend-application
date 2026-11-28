@@ -1,10 +1,29 @@
 import { Prisma } from '@prisma/client';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
+import { dateKeyInTimeZone } from '../../../common/time/property-date.js';
+import { confirmedCollectionLines } from '../../finance/domain/collection-lines.js';
 import { Monetary } from '../../finance/domain/monetary.js';
 import { buildOffsetResponse } from '../../../common/pagination/index.js';
 import type { ActivityQueryDto } from '../api/dto/activity.dto.js';
 import type { DashboardPropertiesQueryDto } from '../api/dto/dashboard.dto.js';
+
+type BillingAmount = bigint | Prisma.Decimal | null;
+
+type BillingTotals = {
+  totalBilled: BillingAmount;
+  totalOutstanding: BillingAmount;
+  periodBilled: BillingAmount;
+  periodOutstanding: BillingAmount;
+  pendingDeposits: BillingAmount;
+  currentDues: BillingAmount;
+  futureDues: BillingAmount;
+  overdueDues: BillingAmount;
+  weekDues: BillingAmount;
+  pastDues: BillingAmount;
+  todayDues: BillingAmount;
+  rentDefaulters: bigint;
+};
 
 async function inBatches<T extends readonly PromiseLike<unknown>[]>(
   queries: T,
@@ -153,6 +172,41 @@ export class DashboardService {
     return value;
   }
 
+  private getBillingTotals(
+    orgId: string,
+    propertyId: string | undefined,
+    today: string,
+    start: string,
+    end: string,
+  ) {
+    return this.prisma.$queryRaw<BillingTotals[]>`
+      SELECT
+        SUM(amount) FILTER (WHERE billed) AS "totalBilled",
+        SUM(balance) FILTER (WHERE billed) AS "totalOutstanding",
+        SUM(amount) FILTER (WHERE in_period AND billed) AS "periodBilled",
+        SUM(balance) FILTER (WHERE in_period AND billed) AS "periodOutstanding",
+        SUM(balance) FILTER (WHERE unpaid AND type = 'SECURITY_DEPOSIT') AS "pendingDeposits",
+        SUM(balance) FILTER (WHERE unpaid AND due_date <= ${today}::date) AS "currentDues",
+        SUM(balance) FILTER (WHERE unpaid AND due_date >= ${today}::date + 7) AS "futureDues",
+        SUM(balance) FILTER (WHERE unpaid AND due_date < ${today}::date) AS "overdueDues",
+        SUM(balance) FILTER (WHERE unpaid AND due_date > ${today}::date AND due_date < ${today}::date + 7) AS "weekDues",
+        SUM(balance) FILTER (WHERE unpaid AND due_date < ${start}::date) AS "pastDues",
+        SUM(balance) FILTER (WHERE unpaid AND due_date = ${today}::date) AS "todayDues",
+        COUNT(DISTINCT resident_id) FILTER (
+          WHERE unpaid AND type = 'RENT' AND due_date < ${today}::date AND balance > 0
+        ) AS "rentDefaulters"
+      FROM (
+        SELECT amount, amount::bigint - paid_amount AS balance, type, due_date, resident_id,
+          status <> 'CANCELLED' AS billed,
+          status IN ('ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE') AS unpaid,
+          due_date >= ${start}::date AND due_date < ${end}::date AS in_period
+        FROM billing_records
+        WHERE organization_id = ${orgId}::uuid
+          ${propertyId ? Prisma.sql`AND property_id = ${propertyId}::uuid` : Prisma.empty}
+      ) AS scoped
+    `;
+  }
+
   private async computeMetrics(
     orgId: string,
     propertyId?: string,
@@ -162,39 +216,34 @@ export class DashboardService {
   ) {
     const propertyFilter = propertyId ? { id: propertyId } : {};
     const residentFilter = propertyId ? { propertyId } : {};
-    const billingFilter = propertyId ? { propertyId } : {};
     const expenseFilter = propertyId ? { propertyId } : {};
     const complaintFilter = propertyId ? { propertyId } : {};
 
+    const property = propertyId
+      ? await this.prisma.property.findFirst({
+          where: { id: propertyId, organizationId: orgId },
+          select: { timezone: true },
+        })
+      : null;
+    if (propertyId && !property)
+      throw new NotFoundException('Property not found');
     const now = new Date();
-    const selectedMonth = month ?? now.getMonth() + 1;
-    const selectedYear = year ?? now.getFullYear();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      0,
-      0,
-      0,
-      0,
-    );
-    const todayEnd = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      23,
-      59,
-      59,
-      999,
-    );
+    const timezone = property?.timezone ?? 'Asia/Kolkata';
+    const todayStart = new Date(dateKeyInTimeZone(now, timezone));
+    const selectedMonth = month ?? todayStart.getUTCMonth() + 1;
+    const selectedYear = year ?? todayStart.getUTCFullYear();
     const fyYear = selectedMonth >= 4 ? selectedYear : selectedYear - 1;
     const monthStart = fy
-      ? new Date(fyYear, 3, 1)
-      : new Date(selectedYear, selectedMonth - 1, 1);
+      ? new Date(Date.UTC(fyYear, 3, 1))
+      : new Date(Date.UTC(selectedYear, selectedMonth - 1, 1));
     const monthEnd = fy
-      ? new Date(fyYear + 1, 3, 1)
-      : new Date(selectedYear, selectedMonth, 1);
-
+      ? new Date(Date.UTC(fyYear + 1, 3, 1))
+      : new Date(Date.UTC(selectedYear, selectedMonth, 1));
+    const startKey = monthStart.toISOString().slice(0, 10);
+    const endKey = monthEnd.toISOString().slice(0, 10);
+    const todayKey = todayStart.toISOString().slice(0, 10);
+    const timestampStart = Prisma.sql`(${startKey}::date::timestamp AT TIME ZONE ${timezone})`;
+    const timestampEnd = Prisma.sql`(${endKey}::date::timestamp AT TIME ZONE ${timezone})`;
     const [
       propertiesCount,
       roomsCount,
@@ -203,29 +252,16 @@ export class DashboardService {
       periodMoveIns,
       periodMoveOuts,
       pendingMoveIns,
-      billingAggregates,
-      currentDuesAggregate,
-      futureDuesAggregate,
-      monthBillingAggregate,
-      paymentsAggregate,
-      todayPaymentsAggregate,
-      monthPaymentsAggregate,
+      [billing],
       expensesAggregate,
       monthExpensesAggregate,
       securityDepositsAggregate,
-      pendingDepositsAggregate,
       pendingComplaintsCount,
-      periodComplaintsCreated,
-      periodComplaintsResolved,
+      complaintPeriod,
       residentStatuses,
       bookingStatuses,
       activeLeads,
-      overdueDuesAggregate,
-      weekDuesAggregate,
-      pastDuesAggregate,
       monthlyRentAggregate,
-      todayDuesAggregate,
-      rentDefaulters,
       residentsWithIdProof,
       collectionBreakdownRows,
       complaintAgeRows,
@@ -249,7 +285,8 @@ export class DashboardService {
         by: ['status'],
         where: {
           organizationId: orgId,
-          status: { not: 'ARCHIVED' },
+          status: { notIn: ['ARCHIVED', 'UNDER_MAINTENANCE'] },
+          isDisabledForRent: false,
           ...(propertyId ? { room: { propertyId } } : {}),
         },
         _count: true,
@@ -289,84 +326,7 @@ export class DashboardService {
         },
       }),
 
-      // Billed dues total
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          status: { not: 'CANCELLED' },
-          ...billingFilter,
-        },
-        _sum: {
-          amount: true,
-          paidAmount: true,
-        },
-      }),
-
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          dueDate: { lte: now },
-          ...billingFilter,
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID'] },
-          dueDate: { gt: now },
-          ...billingFilter,
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-
-      // Current Month Billed dues
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          status: { not: 'CANCELLED' },
-          ...billingFilter,
-          createdAt: { gte: monthStart, lt: monthEnd },
-        },
-        _sum: {
-          amount: true,
-          paidAmount: true,
-        },
-      }),
-
-      // Total collected payments
-      this.prisma.payment.aggregate({
-        where: {
-          organizationId: orgId,
-          status: 'CONFIRMED',
-          ...(propertyId ? { resident: { propertyId } } : {}),
-        },
-        _sum: { amount: true },
-      }),
-
-      // Today collected payments
-      this.prisma.payment.aggregate({
-        where: {
-          organizationId: orgId,
-          status: 'CONFIRMED',
-          ...(propertyId ? { resident: { propertyId } } : {}),
-          createdAt: { gte: todayStart, lte: todayEnd },
-        },
-        _sum: { amount: true },
-      }),
-
-      // Month collected payments
-      this.prisma.payment.aggregate({
-        where: {
-          organizationId: orgId,
-          status: 'CONFIRMED',
-          ...(propertyId ? { resident: { propertyId } } : {}),
-          createdAt: { gte: monthStart, lt: monthEnd },
-        },
-        _sum: { amount: true },
-      }),
+      this.getBillingTotals(orgId, propertyId, todayKey, startKey, endKey),
 
       // Operating expenses
       this.prisma.expense.aggregate({
@@ -396,16 +356,6 @@ export class DashboardService {
         _sum: { securityDeposit: true },
       }),
 
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          type: 'SECURITY_DEPOSIT',
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          ...billingFilter,
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-
       // Pending complaints
       this.prisma.complaint.count({
         where: {
@@ -415,22 +365,13 @@ export class DashboardService {
         },
       }),
 
-      this.prisma.complaint.count({
-        where: {
-          organizationId: orgId,
-          createdAt: { gte: monthStart, lt: monthEnd },
-          ...complaintFilter,
-        },
-      }),
-
-      this.prisma.complaint.count({
-        where: {
-          organizationId: orgId,
-          status: 'RESOLVED',
-          updatedAt: { gte: monthStart, lt: monthEnd },
-          ...complaintFilter,
-        },
-      }),
+      this.prisma.$queryRaw<{ created: bigint; resolved: bigint }[]>`
+        SELECT COUNT(*) FILTER (WHERE created_at >= ${timestampStart} AND created_at < ${timestampEnd}) AS created,
+          COUNT(*) FILTER (WHERE status = 'RESOLVED' AND resolved_at >= ${timestampStart} AND resolved_at < ${timestampEnd}) AS resolved
+        FROM complaints
+        WHERE organization_id = ${orgId}::uuid
+          ${propertyId ? Prisma.sql`AND property_id = ${propertyId}::uuid` : Prisma.empty}
+      `,
       this.prisma.resident.groupBy({
         by: ['status'],
         where: { organizationId: orgId, ...residentFilter },
@@ -448,36 +389,6 @@ export class DashboardService {
           status: { in: ['NEW', 'CONTACTED', 'VISITED', 'TOKEN_PAID'] },
         },
       }),
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          ...billingFilter,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          dueDate: { lt: todayStart },
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          ...billingFilter,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          dueDate: {
-            gte: todayStart,
-            lt: new Date(todayStart.getTime() + 7 * 86400000),
-          },
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          ...billingFilter,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          dueDate: { lt: monthStart },
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
       this.prisma.resident.aggregate({
         where: {
           organizationId: orgId,
@@ -486,22 +397,6 @@ export class DashboardService {
         },
         _sum: { monthlyRent: true },
       }),
-      this.prisma.billingRecord.aggregate({
-        where: {
-          organizationId: orgId,
-          ...billingFilter,
-          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
-          dueDate: { gte: todayStart, lte: todayEnd },
-        },
-        _sum: { amount: true, paidAmount: true },
-      }),
-      this.prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT COUNT(DISTINCT resident_id) AS count FROM billing_records
-        WHERE organization_id = ${orgId}::uuid
-          AND (${propertyId ?? null}::uuid IS NULL OR property_id = ${propertyId ?? null}::uuid)
-          AND type = 'RENT' AND status IN ('ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE')
-          AND due_date < ${todayStart}::date AND amount > paid_amount
-      `,
       this.prisma.resident.count({
         where: {
           organizationId: orgId,
@@ -514,21 +409,22 @@ export class DashboardService {
         { dimension: string; label: string; amount: bigint }[]
       >`
         WITH scoped AS MATERIALIZED (
-          SELECT p.amount, p.mode::text AS mode, p.status::text AS status,
-                 COALESCE(p.recorded_by::text, 'Online') AS recorded_by,
-                 COALESCE(b.type::text, 'Unallocated') AS category
-          FROM payments p
-          JOIN residents r ON r.id = p.resident_id
-          LEFT JOIN billing_records b ON b.id = p.billing_record_id
-          WHERE p.organization_id = ${orgId}::uuid
-            AND (${propertyId ?? null}::uuid IS NULL OR r.property_id = ${propertyId ?? null}::uuid)
-            AND p.status = 'CONFIRMED'
-            AND p.created_at >= ${monthStart} AND p.created_at < ${monthEnd}
+          ${confirmedCollectionLines(orgId, propertyId)}
+        ), period AS (
+          SELECT s.amount, s.mode, s.status, COALESCE(s.category, 'Unallocated') AS category,
+            COALESCE(NULLIF(concat_ws(' ', u.first_name, u.last_name), ''),
+              CASE WHEN s.mode = 'RAZORPAY' THEN 'Online' ELSE 'Unspecified' END) AS recorded_by
+          FROM scoped s
+          LEFT JOIN users u ON u.id = s.recorded_by
+          WHERE s.collection_date >= ${startKey}::date AND s.collection_date < ${endKey}::date
         )
-        SELECT 'Category' AS dimension, category AS label, SUM(amount)::bigint AS amount FROM scoped GROUP BY category
-        UNION ALL SELECT 'Status', status, SUM(amount)::bigint FROM scoped GROUP BY status
-        UNION ALL SELECT 'Mode', mode, SUM(amount)::bigint FROM scoped GROUP BY mode
-        UNION ALL SELECT 'Received By', recorded_by, SUM(amount)::bigint FROM scoped GROUP BY recorded_by
+        SELECT 'Total' AS dimension, 'All' AS label, COALESCE(SUM(amount), 0) AS amount FROM scoped
+        UNION ALL SELECT 'Total', 'Today', COALESCE(SUM(amount), 0) FROM scoped WHERE collection_date = ${todayKey}::date
+        UNION ALL SELECT 'Total', 'Period', COALESCE(SUM(amount), 0) FROM period
+        UNION ALL SELECT 'Category', category, SUM(amount) FROM period GROUP BY category
+        UNION ALL SELECT 'Status', status, SUM(amount) FROM period GROUP BY status
+        UNION ALL SELECT 'Mode', mode, SUM(amount) FROM period GROUP BY mode
+        UNION ALL SELECT 'Received By', recorded_by, SUM(amount) FROM period GROUP BY recorded_by
       `,
       this.prisma.$queryRaw<{ recent: bigint; week: bigint; older: bigint }[]>`
         SELECT
@@ -547,58 +443,42 @@ export class DashboardService {
     let totalBeds = 0;
     let occupiedBeds = 0;
     let availableBeds = 0;
+    let reservedBeds = 0;
 
     for (const stat of bedStats) {
       totalBeds += stat._count;
-      if (stat.status === 'OCCUPIED' || stat.status === 'RESERVED') {
+      if (stat.status === 'OCCUPIED') {
         occupiedBeds += stat._count;
       }
       if (stat.status === 'AVAILABLE') availableBeds += stat._count;
+      if (stat.status === 'RESERVED') reservedBeds += stat._count;
     }
 
     const occupancyRate =
       totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
 
-    const totalBilled = billingAggregates._sum.amount ?? 0;
-    const monthBilled = monthBillingAggregate._sum.amount ?? 0;
-    const monthOutstanding = Math.max(
-      0,
-      monthBilled - (monthBillingAggregate._sum.paidAmount ?? 0),
-    );
-    const totalCollected = paymentsAggregate._sum.amount ?? 0;
-    const todayCollected = todayPaymentsAggregate._sum.amount ?? 0;
-    const monthCollected = monthPaymentsAggregate._sum.amount ?? 0;
-    const totalOutstanding = Math.max(
-      0,
-      totalBilled - (billingAggregates._sum.paidAmount ?? 0),
-    );
+    const totalBilled = Number(billing?.totalBilled ?? 0);
+    const monthBilled = Number(billing?.periodBilled ?? 0);
+    const unpaid = (key: keyof BillingTotals) => Math.max(0, Number(billing?.[key] ?? 0));
+    const monthOutstanding = unpaid('periodOutstanding');
+    const totalFor = (label: string) =>
+      Number(
+        collectionBreakdownRows.find(
+          (row) => row.dimension === 'Total' && row.label === label,
+        )?.amount ?? 0,
+      );
+    const totalCollected = totalFor('All');
+    const todayCollected = totalFor('Today');
+    const monthCollected = totalFor('Period');
+    const totalOutstanding = unpaid('totalOutstanding');
     const totalExpenses = expensesAggregate._sum.amount ?? 0;
     const monthExpenses = monthExpensesAggregate._sum.amount ?? 0;
     const netCashflow = totalCollected - totalExpenses;
     const securityDepositsHeld =
       securityDepositsAggregate._sum.securityDeposit ?? 0;
-    const pendingDeposits = Math.max(
-      0,
-      (pendingDepositsAggregate._sum.amount ?? 0) -
-        (pendingDepositsAggregate._sum.paidAmount ?? 0),
-    );
-    const currentDues = Math.max(
-      0,
-      (currentDuesAggregate._sum.amount ?? 0) -
-        (currentDuesAggregate._sum.paidAmount ?? 0),
-    );
-    const futureDues = Math.max(
-      0,
-      (futureDuesAggregate._sum.amount ?? 0) -
-        (futureDuesAggregate._sum.paidAmount ?? 0),
-    );
-    const unpaid = (aggregate: {
-      _sum: { amount: number | null; paidAmount: number | null };
-    }) =>
-      Math.max(
-        0,
-        (aggregate._sum.amount ?? 0) - (aggregate._sum.paidAmount ?? 0),
-      );
+    const pendingDeposits = unpaid('pendingDeposits');
+    const currentDues = unpaid('currentDues');
+    const futureDues = unpaid('futureDues');
     const residentCount = (status: string) =>
       residentStatuses.find((row) => row.status === status)?._count ?? 0;
     const bookingCount = (status: string) =>
@@ -612,21 +492,22 @@ export class DashboardService {
         totalBeds,
         occupiedBeds,
         availableBeds,
+        reservedBeds,
         occupancyRate,
         currentResidents: activeResidentsCount,
         upcomingMoveIns: pendingMoveIns,
         periodMoveIns,
         periodMoveOuts,
         pendingComplaints: pendingComplaintsCount,
-        periodComplaintsCreated,
-        periodComplaintsResolved,
+        periodComplaintsCreated: Number(complaintPeriod[0]?.created ?? 0),
+        periodComplaintsResolved: Number(complaintPeriod[0]?.resolved ?? 0),
         activeTenants: residentCount('ACTIVE') + residentCount('NOTICE_PERIOD'),
         noticePeriodTenants: residentCount('NOTICE_PERIOD'),
         currentBookings: bookingCount('CONFIRMED'),
         approvedBookings:
           bookingCount('CONFIRMED') + bookingCount('CHECKED_IN'),
         activeLeads,
-        rentDefaulters: Number(rentDefaulters[0]?.count ?? 0),
+        rentDefaulters: Number(billing?.rentDefaulters ?? 0),
         residentsWithIdProof,
         complaintAgeing: {
           under7Days: Number(complaintAgeRows[0]?.recent ?? 0),
@@ -635,11 +516,13 @@ export class DashboardService {
         },
       },
       financial: {
-        collectionBreakdown: collectionBreakdownRows.map((row) => ({
-          dimension: row.dimension,
-          label: row.label,
-          amountPaise: Number(row.amount),
-        })),
+        collectionBreakdown: collectionBreakdownRows
+          .filter((row) => row.dimension !== 'Total')
+          .map((row) => ({
+            dimension: row.dimension,
+            label: row.label,
+            amountPaise: Number(row.amount),
+          })),
         todayCollectedPaise: todayCollected,
         todayCollectedFormatted: Monetary.formatINR(todayCollected),
         monthCollectedPaise: monthCollected,
@@ -668,12 +551,445 @@ export class DashboardService {
         currentDuesFormatted: Monetary.formatINR(currentDues),
         futureDuesPaise: futureDues,
         futureDuesFormatted: Monetary.formatINR(futureDues),
-        overdueDuesPaise: unpaid(overdueDuesAggregate),
-        weekDuesPaise: unpaid(weekDuesAggregate),
-        pastDuesPaise: unpaid(pastDuesAggregate),
+        overdueDuesPaise: unpaid('overdueDues'),
+        weekDuesPaise: unpaid('weekDues'),
+        pastDuesPaise: unpaid('pastDues'),
         potentialRentPaise: monthlyRentAggregate._sum.monthlyRent ?? 0,
-        todayDuesPaise: unpaid(todayDuesAggregate),
+        todayDuesPaise: unpaid('todayDues'),
         monthProfitPaise: monthCollected - monthExpenses,
+      },
+    };
+  }
+
+  /**
+   * Returns complete live data for the redesigned Overview page:
+   * metrics, property overview cards, pending tasks, occupancy breakdown,
+   * journey funnel, and issues overview.
+   */
+  async getOverview(
+    orgId: string,
+    propertyId?: string,
+    month?: number,
+    year?: number,
+    fy = false,
+  ) {
+    const metrics = await this.getMetrics(orgId, propertyId, month, year, fy);
+
+    const now = new Date();
+    const todayStart = new Date(dateKeyInTimeZone(now, 'Asia/Kolkata'));
+    const selectedMonth = metrics.period.month;
+    const selectedYear = metrics.period.year;
+    const fyYear = selectedMonth >= 4 ? selectedYear : selectedYear - 1;
+    const periodStart = fy
+      ? new Date(Date.UTC(fyYear, 3, 1))
+      : new Date(Date.UTC(selectedYear, selectedMonth - 1, 1));
+    const periodEnd = fy
+      ? new Date(Date.UTC(fyYear + 1, 3, 1))
+      : new Date(Date.UTC(selectedYear, selectedMonth, 1));
+    const startKey = periodStart.toISOString().slice(0, 10);
+    const endKey = periodEnd.toISOString().slice(0, 10);
+    const renewalWindowEnd = new Date(todayStart.getTime() + 30 * 86400000);
+
+    const [
+      properties,
+      roomsWithBeds,
+      residentsCompliance,
+      bookingsByProperty,
+      unpaidDuesByProperty,
+      collectedByProperty,
+      leadStatuses,
+      bookingStatuses,
+      residentJourneyCounts,
+      openComplaints,
+    ] = await inBatches([
+      this.prisma.property.findMany({
+        where: {
+          organizationId: orgId,
+          status: 'ACTIVE',
+          ...(propertyId ? { id: propertyId } : {}),
+        },
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: 50,
+        select: { id: true, name: true, type: true, city: true },
+      }),
+      this.prisma.room.findMany({
+        where: {
+          organizationId: orgId,
+          status: { not: 'ARCHIVED' },
+          ...(propertyId ? { propertyId } : {}),
+        },
+        select: {
+          id: true,
+          propertyId: true,
+          isDisabledForRent: true,
+          beds: {
+            where: { status: { not: 'ARCHIVED' } },
+            select: {
+              id: true,
+              status: true,
+              isDisabledForRent: true,
+              residents: {
+                where: {
+                  status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+                },
+                select: { id: true, status: true },
+              },
+              bookings: {
+                where: { status: 'CONFIRMED' },
+                select: { id: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.resident.findMany({
+        where: {
+          organizationId: orgId,
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD', 'PENDING_MOVE_IN'] },
+          ...(propertyId ? { propertyId } : {}),
+        },
+        select: {
+          id: true,
+          propertyId: true,
+          status: true,
+          idProofUrl: true,
+          agreementUrl: true,
+          email: true,
+        },
+      }),
+      this.prisma.booking.groupBy({
+        by: ['propertyId'],
+        where: {
+          organizationId: orgId,
+          status: 'CONFIRMED',
+          ...(propertyId ? { propertyId } : {}),
+        },
+        _count: true,
+      }),
+      this.prisma.billingRecord.groupBy({
+        by: ['propertyId'],
+        where: {
+          organizationId: orgId,
+          status: { in: ['ISSUED', 'DUE', 'PARTIALLY_PAID', 'OVERDUE'] },
+          ...(propertyId ? { propertyId } : {}),
+        },
+        _sum: { amount: true, paidAmount: true },
+      }),
+      this.prisma.$queryRaw<{ propertyId: string; amount: bigint }[]>`
+        WITH scoped AS MATERIALIZED (
+          ${confirmedCollectionLines(orgId, propertyId)}
+        )
+        SELECT r.property_id AS "propertyId", COALESCE(SUM(s.amount), 0) AS amount
+        FROM scoped s
+        JOIN residents r ON r.id = s.resident_id
+        WHERE s.collection_date >= ${startKey}::date
+          AND s.collection_date < ${endKey}::date
+        GROUP BY r.property_id
+      `,
+      this.prisma.lead.groupBy({
+        by: ['status'],
+        where: {
+          organizationId: orgId,
+          ...(propertyId ? { propertyId } : {}),
+        },
+        _count: true,
+      }),
+      this.prisma.booking.groupBy({
+        by: ['status'],
+        where: {
+          organizationId: orgId,
+          ...(propertyId ? { propertyId } : {}),
+        },
+        _count: true,
+      }),
+      this.prisma.resident.aggregate({
+        where: {
+          organizationId: orgId,
+          status: { in: ['ACTIVE', 'NOTICE_PERIOD'] },
+          expectedVacatingDate: { gte: todayStart, lte: renewalWindowEnd },
+          ...(propertyId ? { propertyId } : {}),
+        },
+        _count: true,
+      }),
+      this.prisma.complaint.findMany({
+        where: {
+          organizationId: orgId,
+          status: { not: 'RESOLVED' },
+          ...(propertyId ? { propertyId } : {}),
+        },
+        select: {
+          id: true,
+          status: true,
+          assignedTo: true,
+          category: { select: { name: true } },
+        },
+      }),
+    ] as const);
+
+    // Build staff lookup for complaint assignee names
+    const assigneeIds = Array.from(
+      new Set(
+        openComplaints
+          .map((c) => c.assignedTo)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const staffList =
+      assigneeIds.length > 0
+        ? await this.prisma.staff.findMany({
+            where: { id: { in: assigneeIds }, organizationId: orgId },
+            select: { id: true, firstName: true, lastName: true },
+          })
+        : [];
+    const staffNameMap = new Map(
+      staffList.map((s) => [
+        s.id,
+        [s.firstName, s.lastName].filter(Boolean).join(' '),
+      ]),
+    );
+
+    // Aggregate per-property and global occupancy breakdown (Units & Beds)
+    const propOccupancy = new Map<
+      string,
+      { totalBeds: number; occupiedBeds: number }
+    >();
+    let totalUnits = 0;
+    let occupiedUnits = 0;
+    let vacantUnits = 0;
+    let semiVacantUnits = 0;
+    let overbookedUnits = 0;
+    let totalBeds = 0;
+    let occupiedBeds = 0;
+    let vacantBeds = 0;
+    let reservedBeds = 0;
+    let overbookedBeds = 0;
+    let underNoticeWithBooking = 0;
+
+    for (const room of roomsWithBeds) {
+      totalUnits += 1;
+      const propStats = propOccupancy.get(room.propertyId) ?? {
+        totalBeds: 0,
+        occupiedBeds: 0,
+      };
+      let roomActiveBeds = 0;
+      let roomOccupiedCount = 0;
+      let roomBookingCount = 0;
+
+      for (const bed of room.beds) {
+        const isDisabled = room.isDisabledForRent || bed.isDisabledForRent;
+        const activeOrNoticeCount = bed.residents.filter(
+          (r) => r.status === 'ACTIVE' || r.status === 'NOTICE_PERIOD',
+        ).length;
+        const noticeCount = bed.residents.filter(
+          (r) => r.status === 'NOTICE_PERIOD',
+        ).length;
+        const bookingsCount = bed.bookings.length;
+
+        if (noticeCount > 0 && bookingsCount > 0) {
+          underNoticeWithBooking += 1;
+        }
+
+        if (!isDisabled) {
+          totalBeds += 1;
+          propStats.totalBeds += 1;
+          roomActiveBeds += 1;
+
+          if (activeOrNoticeCount > 0 || bed.status === 'OCCUPIED') {
+            occupiedBeds += 1;
+            propStats.occupiedBeds += 1;
+            roomOccupiedCount += 1;
+          } else if (bed.status === 'RESERVED' || bookingsCount > 0) {
+            reservedBeds += 1;
+          } else if (bed.status === 'AVAILABLE') {
+            vacantBeds += 1;
+          }
+        }
+
+        if (
+          activeOrNoticeCount > 1 ||
+          (activeOrNoticeCount >= 1 && bookingsCount > 0)
+        ) {
+          overbookedBeds += 1;
+        }
+        roomBookingCount += bookingsCount;
+      }
+
+      propOccupancy.set(room.propertyId, propStats);
+
+      if (roomActiveBeds > 0) {
+        if (roomOccupiedCount === 0 && !room.isDisabledForRent) {
+          vacantUnits += 1;
+        } else if (roomOccupiedCount >= roomActiveBeds) {
+          occupiedUnits += 1;
+        } else if (roomOccupiedCount > 0) {
+          semiVacantUnits += 1;
+        }
+        if (roomOccupiedCount + roomBookingCount > roomActiveBeds) {
+          overbookedUnits += 1;
+        }
+      }
+    }
+
+    const activeTenantsByProp = new Map<string, number>();
+    const evictionByProp = new Map<string, number>();
+    let tenantsWithoutIdProof = 0;
+    let tenantsWithoutAgreement = 0;
+    let tenantsWithoutEmail = 0;
+
+    for (const res of residentsCompliance) {
+      if (res.status === 'ACTIVE' || res.status === 'NOTICE_PERIOD') {
+        activeTenantsByProp.set(
+          res.propertyId,
+          (activeTenantsByProp.get(res.propertyId) ?? 0) + 1,
+        );
+      }
+      if (res.status === 'NOTICE_PERIOD') {
+        evictionByProp.set(
+          res.propertyId,
+          (evictionByProp.get(res.propertyId) ?? 0) + 1,
+        );
+      }
+      if (!res.idProofUrl) tenantsWithoutIdProof += 1;
+      if (!res.agreementUrl) tenantsWithoutAgreement += 1;
+      if (!res.email) tenantsWithoutEmail += 1;
+    }
+
+    const bookingsByPropMap = new Map(
+      bookingsByProperty.map((b) => [b.propertyId, b._count]),
+    );
+    const duesByPropMap = new Map(
+      unpaidDuesByProperty.map((d) => [
+        d.propertyId,
+        Math.max(0, (d._sum.amount ?? 0) - (d._sum.paidAmount ?? 0)),
+      ]),
+    );
+    const collectedByPropMap = new Map(
+      collectedByProperty.map((c) => [c.propertyId, Number(c.amount)]),
+    );
+
+    const propertyCards = properties.map((p) => {
+      const occ = propOccupancy.get(p.id) ?? { totalBeds: 0, occupiedBeds: 0 };
+      return {
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        city: p.city,
+        code: p.id.replace(/-/g, '').slice(0, 10).toUpperCase(),
+        totalBeds: occ.totalBeds,
+        occupiedBeds: occ.occupiedBeds,
+        vacantBeds: Math.max(0, occ.totalBeds - occ.occupiedBeds),
+        activeTenants: activeTenantsByProp.get(p.id) ?? 0,
+        underEvictionCount: evictionByProp.get(p.id) ?? 0,
+        currentBookings: bookingsByPropMap.get(p.id) ?? 0,
+        pendingDuesPaise: duesByPropMap.get(p.id) ?? 0,
+        monthCollectedPaise: collectedByPropMap.get(p.id) ?? 0,
+      };
+    });
+
+    const leadCount = (status: string) =>
+      leadStatuses.find((r) => r.status === status)?._count ?? 0;
+    const totalLeads = leadStatuses.reduce((sum, r) => sum + r._count, 0);
+
+    const bookingCount = (status: string) =>
+      bookingStatuses.find((r) => r.status === status)?._count ?? 0;
+    const totalBookings = bookingStatuses.reduce((sum, r) => sum + r._count, 0);
+
+    const categoryMap = new Map<string, number>();
+    const statusMap = new Map<string, number>();
+    const assigneeMap = new Map<string, number>();
+    for (const complaint of openComplaints) {
+      const cat = complaint.category?.name ?? 'General';
+      categoryMap.set(cat, (categoryMap.get(cat) ?? 0) + 1);
+      const st = complaint.status.replaceAll('_', ' ');
+      statusMap.set(st, (statusMap.get(st) ?? 0) + 1);
+      const assignee = complaint.assignedTo
+        ? (staffNameMap.get(complaint.assignedTo) ?? 'Assigned Staff')
+        : 'Unassigned';
+      assigneeMap.set(assignee, (assigneeMap.get(assignee) ?? 0) + 1);
+    }
+
+    const unitOccupancyRate =
+      totalUnits > 0
+        ? Math.round(((occupiedUnits + semiVacantUnits) / totalUnits) * 100)
+        : 0;
+    const bedOccupancyRate =
+      totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+
+    return {
+      ...metrics,
+      properties: propertyCards,
+      pendingTasks: {
+        tenantsWithoutIdProof,
+        tenantsWithoutAgreement,
+        tenantsWithoutEmail,
+        pendingComplaints: metrics.operational.pendingComplaints,
+        rentDefaulters: metrics.operational.rentDefaulters,
+      },
+      occupancyBreakdown: {
+        units: {
+          total: totalUnits,
+          occupied: occupiedUnits,
+          vacant: vacantUnits,
+          semiVacant: semiVacantUnits,
+          occupancyRate: unitOccupancyRate,
+          underNotice: metrics.operational.noticePeriodTenants,
+          underNoticeWithBooking,
+          overbooked: overbookedUnits,
+        },
+        beds: {
+          total: totalBeds,
+          occupied: occupiedBeds,
+          vacant: vacantBeds,
+          reserved: reservedBeds,
+          occupancyRate: bedOccupancyRate,
+          underNotice: metrics.operational.noticePeriodTenants,
+          underNoticeWithBooking,
+          overbooked: overbookedBeds,
+        },
+      },
+      journey: {
+        leads: {
+          total: totalLeads,
+          newCount: leadCount('NEW'),
+          contacted: leadCount('CONTACTED'),
+          visited: leadCount('VISITED'),
+          tokenPaid: leadCount('TOKEN_PAID'),
+          converted: leadCount('CONVERTED'),
+          lost: leadCount('LOST'),
+        },
+        bookings: {
+          total: totalBookings,
+          confirmed: bookingCount('CONFIRMED'),
+          checkedIn: bookingCount('CHECKED_IN'),
+          cancelled: bookingCount('CANCELLED'),
+          expired: bookingCount('EXPIRED'),
+        },
+        tenants: {
+          total: metrics.operational.currentResidents,
+          active: Math.max(
+            0,
+            metrics.operational.activeTenants -
+              metrics.operational.noticePeriodTenants,
+          ),
+          noticeRaised: metrics.operational.noticePeriodTenants,
+          confirmedEviction: metrics.operational.noticePeriodTenants,
+          renewalsDue: residentJourneyCounts._count ?? 0,
+        },
+      },
+      issuesOverview: {
+        totalOpen: openComplaints.length,
+        byCategory: Array.from(categoryMap.entries()).map(([label, count]) => ({
+          label,
+          count,
+        })),
+        byStatus: Array.from(statusMap.entries()).map(([label, count]) => ({
+          label,
+          count,
+        })),
+        byAssignee: Array.from(assigneeMap.entries()).map(([label, count]) => ({
+          label,
+          count,
+        })),
       },
     };
   }

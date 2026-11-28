@@ -55,6 +55,7 @@ __decorate([
 ], PaymentsController.prototype, "recordPayment", null);
 __decorate([
     Post('razorpay/order'),
+    RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER', 'STAFF'),
     HttpCode(HttpStatus.CREATED),
     ApiOperation({ summary: 'Create a server-side Razorpay payment order' }),
     ApiResponse({ status: 201, description: 'Order created' }),
@@ -67,6 +68,7 @@ __decorate([
 ], PaymentsController.prototype, "createRazorpayOrder", null);
 __decorate([
     Post('razorpay/verify'),
+    RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER', 'STAFF'),
     HttpCode(HttpStatus.OK),
     ApiOperation({
         summary: 'Cryptographically verify Razorpay payment HMAC signature and confirm payment',

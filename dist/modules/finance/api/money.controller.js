@@ -28,6 +28,9 @@ let MoneyController = class MoneyController {
     createLink(id, org, user) {
         return this.links.create(id, org, user);
     }
+    createQr(id, org, user) {
+        return this.links.create(id, org, user, 'qr');
+    }
     properties(org, q) {
         return this.money.properties(org, q);
     }
@@ -117,6 +120,15 @@ __decorate([
     __metadata("design:paramtypes", [String, String, String]),
     __metadata("design:returntype", void 0)
 ], MoneyController.prototype, "createLink", null);
+__decorate([
+    Post('residents/:id/payment-qr'),
+    __param(0, Param('id', new ParseUUIDPipe())),
+    __param(1, CurrentOrgId()),
+    __param(2, CurrentUserId()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, String, String]),
+    __metadata("design:returntype", void 0)
+], MoneyController.prototype, "createQr", null);
 __decorate([
     Get('properties'),
     __param(0, CurrentOrgId()),

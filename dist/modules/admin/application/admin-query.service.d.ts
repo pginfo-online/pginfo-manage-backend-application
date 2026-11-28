@@ -136,7 +136,7 @@ export declare class AdminQueryService {
             role: import("@prisma/client").$Enums.PlatformRole;
         } | null;
         id: string;
-        email: string;
+        email: string | null;
         mobile: string | null;
         firstName: string;
         lastName: string | null;
@@ -164,7 +164,7 @@ export declare class AdminQueryService {
             permissionOverrides: string[];
         } | null;
         id: string;
-        email: string;
+        email: string | null;
         mobile: string | null;
         firstName: string;
         lastName: string | null;
@@ -193,8 +193,8 @@ export declare class AdminQueryService {
         payoutAccounts: {
             id: string;
             status: import("@prisma/client").$Enums.PayoutAccountStatus;
-            businessName: string;
             kycStatus: import("@prisma/client").$Enums.KycStatus;
+            businessName: string;
             accountNumberMasked: string;
         }[];
     }>;
@@ -229,7 +229,7 @@ export declare class AdminQueryService {
         members: {
             user: {
                 id: string;
-                email: string;
+                email: string | null;
                 mobile: string | null;
                 firstName: string;
                 lastName: string | null;
@@ -259,8 +259,8 @@ export declare class AdminQueryService {
         };
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -305,8 +305,8 @@ export declare class AdminQueryService {
             bookings: number;
         };
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -601,8 +601,8 @@ export declare class AdminQueryService {
         };
         billingRecord: {
             id: string;
-            status: import("@prisma/client").$Enums.BillingStatus;
             type: import("@prisma/client").$Enums.BillingType;
+            status: import("@prisma/client").$Enums.BillingStatus;
             amount: number;
             paidAmount: number;
         } | null;
@@ -642,8 +642,8 @@ export declare class AdminQueryService {
         };
         billingRecord: {
             id: string;
-            status: import("@prisma/client").$Enums.BillingStatus;
             type: import("@prisma/client").$Enums.BillingType;
+            status: import("@prisma/client").$Enums.BillingStatus;
             createdAt: Date;
             updatedAt: Date;
             organizationId: string;
@@ -683,7 +683,7 @@ export declare class AdminQueryService {
     payouts(query: AdminPayoutsQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
@@ -701,15 +701,15 @@ export declare class AdminQueryService {
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
-        propertyId: string | null;
         phone: string;
+        propertyId: string | null;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
         businessName: string;
         businessType: string;
         ifscCode: string;
-        kycStatus: import("@prisma/client").$Enums.KycStatus;
-        razorpayAccountId: string;
-        accountNumberMasked: string;
         beneficiaryName: string;
+        accountNumberMasked: string;
+        razorpayAccountId: string;
     }>>;
     ledger(query: AdminPaymentsQueryDto): Promise<{
         totals: {
@@ -793,15 +793,15 @@ export declare class AdminQueryService {
             status: import("@prisma/client").$Enums.PayoutAccountStatus;
             createdAt: Date;
             organizationId: string;
-            businessName: string;
             kycStatus: import("@prisma/client").$Enums.KycStatus;
+            businessName: string;
             accountNumberMasked: string;
         }[];
     }>;
     auditLogs(query: AdminAuditQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         } | null;

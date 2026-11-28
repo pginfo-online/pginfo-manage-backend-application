@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -11,22 +12,14 @@ async function bootstrap() {
     });
     app.useLogger(app.get(Logger));
     app.use(helmet());
-    const defaultCorsOrigins = [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'http://localhost:5000',
-        'http://localhost:5173',
-        'https://app.pginfo.business',
-        'https://api.pginfo.business',
-    ];
-    const parsedOrigins = (process.env['CORS_ORIGINS'] ?? '')
-        .split(',')
-        .map((origin) => origin.trim().replace(/\/$/, ''))
-        .filter(Boolean);
-    const corsOrigins = parsedOrigins.length > 0 ? parsedOrigins : defaultCorsOrigins;
+    const config = app.get(ConfigService);
+    const trustedProxies = config.get('TRUSTED_PROXY_IPS');
+    if (trustedProxies.length)
+        app.set('trust proxy', trustedProxies);
     app.enableCors({
-        origin: corsOrigins,
+        origin: config.get('CORS_ORIGINS'),
         credentials: true,
+        maxAge: 600,
         methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: [
             'Content-Type',
@@ -64,8 +57,8 @@ async function bootstrap() {
         });
     }
     app.enableShutdownHooks();
-    const port = Number(process.env['PORT'] ?? 3000);
-    await app.listen(port, '0.0.0.0');
+    const port = config.get('PORT');
+    await app.listen(port, config.get('LISTEN_HOST'));
     const logger = app.get(Logger);
     logger.log(`🏠 PgInfo API listening on port ${port}/${apiPrefix}`);
     logger.log(`📖 Swagger docs at http://localhost:${port}/api/docs`);

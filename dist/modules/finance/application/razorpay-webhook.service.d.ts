@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
-import { type WhatsAppAdapter, type EmailAdapter } from '../../communications/domain/notification.interfaces.js';
+import { type WhatsAppAdapter } from '../../communications/domain/notification.interfaces.js';
 import type { EnvConfig } from '../../../config/index.js';
 import { MoneyLinksService } from './money-links.service.js';
 import { PaymentsService } from './payments.service.js';
@@ -13,6 +13,19 @@ export interface RazorpayWebhookPayload {
     contains?: string[];
     created_at?: number;
     payload: {
+        qr_code?: {
+            entity: {
+                id: string;
+                close_reason?: string;
+                notes?: Record<string, string>;
+            };
+        };
+        refund?: {
+            entity: {
+                id: string;
+                payment_id: string;
+            };
+        };
         payment_link?: {
             entity: {
                 id: string;
@@ -31,6 +44,8 @@ export interface RazorpayWebhookPayload {
                 status?: string;
                 token_id?: string;
                 paid_count?: number;
+                charge_at?: number | null;
+                current_start?: number | null;
                 total_count?: number;
                 auth_attempts?: number;
                 notes?: Record<string, string>;
@@ -39,6 +54,7 @@ export interface RazorpayWebhookPayload {
         payment?: {
             entity: {
                 id: string;
+                created_at?: number;
                 amount: number;
                 currency?: string;
                 status?: string;
@@ -75,24 +91,15 @@ export declare class RazorpayWebhookService {
     private readonly razorpayAdapter;
     private readonly config;
     private readonly whatsappAdapter?;
-    private readonly emailAdapter?;
     private readonly paymentsService?;
     private readonly moneyLinks?;
     private readonly logger;
-    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter, config: ConfigService<EnvConfig, true>, whatsappAdapter?: WhatsAppAdapter | undefined, emailAdapter?: EmailAdapter | undefined, paymentsService?: PaymentsService | undefined, moneyLinks?: MoneyLinksService | undefined);
+    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter, config: ConfigService<EnvConfig, true>, whatsappAdapter?: WhatsAppAdapter | undefined, paymentsService?: PaymentsService | undefined, moneyLinks?: MoneyLinksService | undefined);
     private getPlatformFeePaise;
-    handleWebhook(rawBody: string, signature: string, providerEventId?: string): Promise<{
-        status: string;
-        message: string;
-        eventId?: undefined;
-        processedAt?: undefined;
-        received?: undefined;
-        event?: undefined;
-    } | {
+    handleWebhook(rawBody: Buffer | string, signature: string, providerEventId?: string): Promise<{
         status: string;
         eventId: string;
         processedAt: Date;
-        message?: undefined;
         received?: undefined;
         event?: undefined;
     } | {
@@ -100,13 +107,12 @@ export declare class RazorpayWebhookService {
         event: string;
         eventId: string;
         status?: undefined;
-        message?: undefined;
         processedAt?: undefined;
     }>;
-    private handleSubscriptionAuthenticated;
+    private eventTime;
+    private updateMandateLifecycle;
     private handleSubscriptionCharged;
     private sendReceiptNotifications;
     private handlePaymentFailed;
-    private handleSubscriptionCancelledOrPaused;
     private handleOneTimePaymentCaptured;
 }

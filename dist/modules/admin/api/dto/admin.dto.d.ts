@@ -31,26 +31,26 @@ export declare const adminPortfolioQuerySchema: z.ZodEffects<z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     limit: number;
     organizationId?: string | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }, {
     organizationId?: string | undefined;
     limit?: number | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }>, {
     limit: number;
     organizationId?: string | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }, {
     organizationId?: string | undefined;
     limit?: number | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }>;
 export type AdminPortfolioQueryDto = z.infer<typeof adminPortfolioQuerySchema>;
@@ -296,8 +296,8 @@ export declare const adminPaymentsQuerySchema: z.ZodEffects<z.ZodObject<{
     mode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
     organizationId?: string | undefined;
     limit?: number | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }>, {
     limit: number;
@@ -314,11 +314,47 @@ export declare const adminPaymentsQuerySchema: z.ZodEffects<z.ZodObject<{
     mode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
     organizationId?: string | undefined;
     limit?: number | undefined;
-    page?: number | undefined;
     to?: Date | undefined;
+    page?: number | undefined;
     from?: Date | undefined;
 }>;
 export type AdminPaymentsQueryDto = z.infer<typeof adminPaymentsQuerySchema>;
+export declare const applyDisputedCaptureSchema: z.ZodObject<{
+    reason: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    reason: string;
+}, {
+    reason: string;
+}>;
+export declare const reconcileSettlementSchema: z.ZodObject<{
+    settledOn: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>;
+}, "strip", z.ZodTypeAny, {
+    settledOn: string;
+}, {
+    settledOn: string;
+}>;
+export declare const prepareManualPayoutSchema: z.ZodObject<{
+    payoutAccountId: z.ZodString;
+    amount: z.ZodNumber;
+}, "strip", z.ZodTypeAny, {
+    amount: number;
+    payoutAccountId: string;
+}, {
+    amount: number;
+    payoutAccountId: string;
+}>;
+export type PrepareManualPayoutDto = z.infer<typeof prepareManualPayoutSchema>;
+export declare const recordManualPayoutSchema: z.ZodObject<{
+    bankReference: z.ZodString;
+    paidOn: z.ZodEffects<z.ZodEffects<z.ZodString, string, string>, string, string>;
+}, "strip", z.ZodTypeAny, {
+    bankReference: string;
+    paidOn: string;
+}, {
+    bankReference: string;
+    paidOn: string;
+}>;
+export type RecordManualPayoutDto = z.infer<typeof recordManualPayoutSchema>;
 export declare const adminPayoutsQuerySchema: z.ZodObject<{
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
@@ -374,21 +410,21 @@ export declare const adminAuditQuerySchema: z.ZodEffects<z.ZodObject<{
     search?: string | undefined;
     userId?: string | undefined;
     organizationId?: string | undefined;
+    to?: Date | undefined;
     action?: string | undefined;
     entityType?: string | undefined;
     entityId?: string | undefined;
-    to?: Date | undefined;
     from?: Date | undefined;
 }, {
     search?: string | undefined;
     userId?: string | undefined;
     organizationId?: string | undefined;
     limit?: number | undefined;
+    to?: Date | undefined;
     action?: string | undefined;
     entityType?: string | undefined;
     entityId?: string | undefined;
     page?: number | undefined;
-    to?: Date | undefined;
     from?: Date | undefined;
 }>, {
     limit: number;
@@ -396,21 +432,21 @@ export declare const adminAuditQuerySchema: z.ZodEffects<z.ZodObject<{
     search?: string | undefined;
     userId?: string | undefined;
     organizationId?: string | undefined;
+    to?: Date | undefined;
     action?: string | undefined;
     entityType?: string | undefined;
     entityId?: string | undefined;
-    to?: Date | undefined;
     from?: Date | undefined;
 }, {
     search?: string | undefined;
     userId?: string | undefined;
     organizationId?: string | undefined;
     limit?: number | undefined;
+    to?: Date | undefined;
     action?: string | undefined;
     entityType?: string | undefined;
     entityId?: string | undefined;
     page?: number | undefined;
-    to?: Date | undefined;
     from?: Date | undefined;
 }>;
 export type AdminAuditQueryDto = z.infer<typeof adminAuditQuerySchema>;
@@ -447,15 +483,15 @@ export declare const adminCasesQuerySchema: z.ZodObject<{
     limit: number;
     page: number;
     search?: string | undefined;
-    status?: "RESOLVED" | "REJECTED" | "OPEN" | "IN_REVIEW" | "BLOCKED" | undefined;
     type?: "OTHER" | "PROPERTY_VERIFICATION" | "PAYOUT_KYC" | "PAYMENT_REVIEW" | "SUPPORT_ESCALATION" | "FRAUD_REVIEW" | "DATA_CORRECTION" | undefined;
+    status?: "RESOLVED" | "REJECTED" | "OPEN" | "IN_REVIEW" | "BLOCKED" | undefined;
     organizationId?: string | undefined;
     priority?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | undefined;
     assignedToUserId?: string | undefined;
 }, {
     search?: string | undefined;
-    status?: "RESOLVED" | "REJECTED" | "OPEN" | "IN_REVIEW" | "BLOCKED" | undefined;
     type?: "OTHER" | "PROPERTY_VERIFICATION" | "PAYOUT_KYC" | "PAYMENT_REVIEW" | "SUPPORT_ESCALATION" | "FRAUD_REVIEW" | "DATA_CORRECTION" | undefined;
+    status?: "RESOLVED" | "REJECTED" | "OPEN" | "IN_REVIEW" | "BLOCKED" | undefined;
     organizationId?: string | undefined;
     limit?: number | undefined;
     page?: number | undefined;

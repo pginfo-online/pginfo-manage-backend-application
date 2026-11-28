@@ -74,6 +74,7 @@ export declare class MandatesController {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>>;
@@ -85,8 +86,8 @@ export declare class MandatesController {
         landlordPayoutAccount: {
             id: string;
             businessName: string;
-            razorpayAccountId: string;
             beneficiaryName: string;
+            razorpayAccountId: string;
         } | null;
         unit: {
             id: string;
@@ -155,6 +156,7 @@ export declare class MandatesController {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>;
@@ -191,6 +193,7 @@ export declare class MandatesController {
         failureReason: string | null;
         retryCount: number;
         startedAt: Date | null;
+        gatewayStatusAt: Date | null;
         nextChargeDate: Date | null;
         cancelledAt: Date | null;
     }>;

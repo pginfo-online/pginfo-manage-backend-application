@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { DashboardService } from '../../src/modules/reporting/application/dashboard.service.js';
 import { ExportService } from '../../src/modules/reporting/application/export.service.js';
+import { confirmedCollectionLines } from '../../src/modules/finance/domain/collection-lines.js';
 
 describe('DashboardService & ExportService', () => {
   let dashboardService: DashboardService;
@@ -11,8 +12,15 @@ describe('DashboardService & ExportService', () => {
     mockPrisma = {
       $queryRaw: vi
         .fn()
-        .mockResolvedValueOnce([{ count: 2n }])
-        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{
+          totalBilled: 12000000n,
+          totalOutstanding: 2000000n,
+          rentDefaulters: 2n,
+        }])
+        .mockResolvedValueOnce([{ created: 4n, resolved: 1n }])
+        .mockResolvedValueOnce([
+          { dimension: 'Total', label: 'All', amount: 10000000n },
+        ])
         .mockResolvedValueOnce([{ recent: 1n, week: 2n, older: 3n }]),
       $transaction: vi.fn((operations: Promise<unknown>[]) =>
         Promise.all(operations),
@@ -58,11 +66,6 @@ describe('DashboardService & ExportService', () => {
           },
         ]),
       },
-      billingRecord: {
-        aggregate: vi.fn().mockResolvedValue({
-          _sum: { amount: 12000000, paidAmount: 10000000 },
-        }),
-      },
       payment: {
         aggregate: vi.fn().mockResolvedValue({
           _sum: { amount: 10000000 },
@@ -102,6 +105,10 @@ describe('DashboardService & ExportService', () => {
 
     dashboardService = new DashboardService(mockPrisma as any);
     exportService = new ExportService(mockPrisma as any);
+  });
+
+  it('includes resident IDs in collection lines for overview property grouping', () => {
+    expect(confirmedCollectionLines('org-1').sql).toContain('p.resident_id');
   });
 
   it('should compute operational and financial indicators accurately', async () => {
@@ -162,5 +169,96 @@ describe('DashboardService & ExportService', () => {
     );
     expect(csv).toContain('Sneha');
     expect(csv).toContain('Sunrise PG');
+  });
+
+  it('getOverview returns property cards, pending tasks, occupancy breakdown, journey, and issues', async () => {
+    mockPrisma.$queryRaw = vi
+      .fn()
+      .mockResolvedValueOnce([{ rentDefaulters: 1n }])
+      .mockResolvedValueOnce([{ created: 1n, resolved: 1n }])
+      .mockResolvedValueOnce([
+        { dimension: 'Total', label: 'All', amount: 500000n },
+        { dimension: 'Total', label: 'Today', amount: 100000n },
+        { dimension: 'Total', label: 'Period', amount: 500000n },
+      ])
+      .mockResolvedValueOnce([{ recent: 1n, week: 0n, older: 0n }])
+      .mockResolvedValueOnce([{ propertyId: 'p1', amount: 500000n }]);
+
+    mockPrisma.property.findMany.mockResolvedValue([
+      { id: 'p1', name: 'Sunrise PG', type: 'PG', city: 'Bengaluru' },
+    ]);
+    mockPrisma.room.findMany = vi.fn().mockResolvedValue([
+      {
+        id: 'r1',
+        propertyId: 'p1',
+        isDisabledForRent: false,
+        beds: [
+          {
+            id: 'b1',
+            status: 'OCCUPIED',
+            isDisabledForRent: false,
+            residents: [{ id: 'res-1', status: 'ACTIVE' }],
+            bookings: [],
+          },
+          {
+            id: 'b2',
+            status: 'AVAILABLE',
+            isDisabledForRent: false,
+            residents: [],
+            bookings: [],
+          },
+        ],
+      },
+    ]);
+    mockPrisma.resident.findMany.mockResolvedValue([
+      {
+        id: 'res-1',
+        propertyId: 'p1',
+        status: 'ACTIVE',
+        idProofUrl: null,
+        agreementUrl: null,
+        email: null,
+      },
+    ]);
+    mockPrisma.resident.aggregate.mockResolvedValue({
+      _sum: { securityDeposit: 1000000, monthlyRent: 800000 },
+      _count: 1,
+    });
+    mockPrisma.billingRecord = {
+      groupBy: vi.fn().mockResolvedValue([
+        { propertyId: 'p1', _sum: { amount: 500000, paidAmount: 0 } },
+      ]),
+    };
+    mockPrisma.lead.groupBy = vi
+      .fn()
+      .mockResolvedValue([{ status: 'NEW', _count: 3 }]);
+    mockPrisma.complaint.findMany = vi.fn().mockResolvedValue([
+      {
+        id: 'c1',
+        status: 'RECEIVED',
+        assignedTo: null,
+        category: { name: 'Plumbing' },
+      },
+    ]);
+
+    const overview = await dashboardService.getOverview('org-1');
+
+    expect(overview.properties).toHaveLength(1);
+    expect(overview.properties[0]).toMatchObject({
+      id: 'p1',
+      name: 'Sunrise PG',
+      totalBeds: 2,
+      occupiedBeds: 1,
+      activeTenants: 1,
+      pendingDuesPaise: 500000,
+      monthCollectedPaise: 500000,
+    });
+    expect(overview.pendingTasks.tenantsWithoutIdProof).toBe(1);
+    expect(overview.pendingTasks.tenantsWithoutAgreement).toBe(1);
+    expect(overview.occupancyBreakdown.units.semiVacant).toBe(1);
+    expect(overview.journey.leads.newCount).toBe(3);
+    expect(overview.issuesOverview.byCategory).toEqual([
+      { label: 'Plumbing', count: 1 },
+    ]);
   });
 });

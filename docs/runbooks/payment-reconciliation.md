@@ -1,72 +1,25 @@
-# Payment Reconciliation & Webhook Runbook
+# PGInfo payment reconciliation
 
-## 1. Overview
-PgInfo processes rental dues, security deposits, and maintenance charges through two primary rails:
-1. **Online Payments**: Automated via Razorpay Orders, Checkout, and Webhooks.
-2. **Offline Payments**: Recorded manually by property staff (UPI, Cash, Cheque, Bank Transfer).
+Autopay, Razorpay Checkout, payment links, and fixed-amount UPI QR codes use the PGInfo Razorpay merchant credentials. The tenant ledger records captures in paise. A valid capture that cannot be allocated to the current dues appears in Online Collections & Payouts for review.
 
----
+## Production configuration
 
-## 2. Online Payment Lifecycle & Reconciliation
+1. Use `https://app.pginfo.business/api/v1/webhooks/razorpay` in Razorpay Live Mode. Configure the same signing secret in the backend and Razorpay Dashboard. An unsigned POST should return HTTP 400, and a request with an invalid signature should return HTTP 401.
+2. Enable `payment.captured`, `payment.failed`, `order.paid`, `payment_link.paid`, `payment_link.expired`, `payment_link.cancelled`, `qr_code.credited`, `qr_code.closed`, `refund.processed`, and the Autopay authentication, activation, charge, pending, halt, pause, resume, completion, and cancellation events.
+3. Set `PAYOUT_BANK_ENCRYPTION_KEY` to a separately generated 32-byte secret encoded as 64 hexadecimal characters. Store it in the deployment secret store and retain it with the database backups. The encryption key is required to read submitted bank account numbers.
+4. Apply the central collections migration before starting the new API and admin. Ask owners with existing Route-only bank records to submit the full account number through Money → Banks. Existing masked digits cannot be used to reconstruct it.
+5. Check Razorpay webhook delivery history for failed deliveries to the old URL. Replay authentic captured, QR, link, subscription, and refund events in Razorpay where available. Investigate older missing captures against the provider transaction and settlement reports.
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant Client as Mobile / Web Client
-  participant Server as PgInfo API
-  participant DB as PostgreSQL
-  participant RZP as Razorpay
-  
-  Client->>Server: POST /api/v1/payments/razorpay/order
-  Server->>RZP: Create Order (amount in paise, receipt)
-  RZP-->>Server: orderId
-  Server->>DB: Insert Payment (status: PENDING)
-  Server-->>Client: orderId, amount, currency
-  
-  Client->>RZP: Customer completes payment
-  RZP-->>Client: paymentId, orderId, signature
-  
-  Client->>Server: POST /api/v1/payments/razorpay/verify
-  Server->>Server: HMAC-SHA256(orderId|paymentId, secret)
-  alt Signature matches
-    Server->>DB: Update Payment (CONFIRMED) & allocate to bills
-    Server-->>Client: Receipt details
-  else Signature invalid
-    Server->>DB: Update Payment (FAILED)
-    Server-->>Client: 401 Unauthorized
-  end
+## Settlement and payout workflow
 
-  opt Asynchronous Webhook
-    RZP->>Server: POST /api/v1/webhooks/razorpay (payment.captured)
-    Server->>Server: Verify x-razorpay-signature
-    Server->>DB: Deduplicate & confirm payment if not already confirmed
-    Server-->>RZP: 200 OK
-  end
-```
+1. Open **Online Collections & Payouts**, find the Razorpay payment ID, and check the tenant, property, and captured amount. If dues changed, use **Apply capture to dues** after reviewing the tenant ledger, or reconcile the refund through Razorpay.
+2. Enter the settlement date shown in Razorpay and select **Verify settlement**. The API checks that the Razorpay reconciliation report contains the captured payment and that the processed settlement has a bank UTR.
+3. Have a finance administrator verify the destination in **Payout KYC Accounts**. Account number access is recorded in the audit log.
+4. Prepare the payout against the verified destination. The app reserves a single payout for the collection. Send the displayed amount from the bank portal and record the completed transfer using its unique bank UTR and transfer date. Release the reservation only after confirming the bank transfer was never initiated.
+5. Review refunds reported after a payout against the recorded bank transfer. Historical Razorpay Route transfers remain visible in the register. Existing Route transfers and historical payments with unverifiable Route activity stay in review.
 
----
+The owner payout amount is the net Razorpay settlement credit less the recorded PGInfo Autopay fee. Payments with a refund or unresolved allocation are held. Checkout, payment links, and generated QR codes use a zero PGInfo fee.
 
-## 3. Webhook Handling & Deduplication Rules
+## Verification
 
-1. **Never trust client callbacks alone**: A payment is only marked `CONFIRMED` upon cryptographic verification of the HMAC SHA-256 signature on the server or via authoritative webhook.
-2. **Idempotent Webhooks**: If a webhook event for `payment.captured` arrives and the payment has already been marked `CONFIRMED` by the verify endpoint, the system logs the event and returns `200 OK` without double-allocating money to bills.
-3. **Webhook Retries**: If the webhook server returns non-200, Razorpay retries over 24 hours. The handler must process repeated delivery without side-effects.
-
----
-
-## 4. Troubleshooting Delayed or Dropped Payments
-
-If a resident was debited by their bank but their payment is still showing as `PENDING`:
-
-1. Locate the payment in the database using the resident ID or `razorpay_order_id`:
-   ```sql
-   SELECT id, status, amount, razorpay_order_id, razorpay_payment_id, created_at 
-   FROM payments 
-   WHERE resident_id = 'RESIDENT_UUID'
-   ORDER BY created_at DESC LIMIT 5;
-   ```
-2. Verify payment status in the Razorpay Dashboard using `razorpay_order_id`.
-3. If Razorpay shows the payment as `captured`:
-   - Copy `razorpay_payment_id`.
-   - Call the internal verification tool or replay the webhook payload to the webhook endpoint.
-   - The system will atomically mark the payment `CONFIRMED` and apply payments to the resident's bills FIFO.
+Use an isolated PostgreSQL and Redis instance for `pnpm test:e2e`. The integration tests send signed webhook requests to NestJS, exercise payment allocation and refunds, and test reservation concurrency and bank-detail access. For a live acceptance run, use an agreed payment amount, authorized payer, and verified bank destination. Match the capture, receipt, settlement, and payout references against Razorpay and the bank.

@@ -93,8 +93,8 @@ export declare const updatePropertySchema: z.ZodObject<{
         UNDER_MAINTENANCE: "UNDER_MAINTENANCE";
     }>>;
 }, "strip", z.ZodTypeAny, {
-    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     name?: string | undefined;
     description?: string | undefined;
     addressLine1?: string | undefined;
@@ -111,8 +111,8 @@ export declare const updatePropertySchema: z.ZodObject<{
     amenities?: string[] | undefined;
     totalFloors?: number | undefined;
 }, {
-    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     name?: string | undefined;
     description?: string | undefined;
     addressLine1?: string | undefined;
@@ -153,12 +153,12 @@ export declare const queryPropertiesSchema: z.ZodObject<{
     limit: number;
     page: number;
     search?: string | undefined;
-    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
 }, {
     search?: string | undefined;
-    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     type?: "PG" | "HOSTEL" | "CO_LIVING" | "FLAT" | "APARTMENT" | "RK" | "OTHER" | undefined;
+    status?: "ACTIVE" | "INACTIVE" | "ARCHIVED" | "UNDER_MAINTENANCE" | undefined;
     limit?: number | undefined;
     page?: number | undefined;
 }>;

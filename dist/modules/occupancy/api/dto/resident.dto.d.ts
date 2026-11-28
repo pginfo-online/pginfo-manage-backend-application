@@ -355,21 +355,39 @@ export declare const queryResidentsSchema: z.ZodObject<{
         MOVED_OUT: "MOVED_OUT";
         ARCHIVED: "ARCHIVED";
     }>>;
+    kycStatus: z.ZodOptional<z.ZodEnum<["ALL", "UPLOADED", "PENDING"]>>;
+    evictionStatus: z.ZodOptional<z.ZodEnum<["ALL", "ON_NOTICE", "ACTIVE_STAY"]>>;
+    moveInPreset: z.ZodOptional<z.ZodEnum<["ALL", "LAST_7_DAYS", "LAST_30_DAYS", "THIS_MONTH"]>>;
+    createdAtPreset: z.ZodOptional<z.ZodEnum<["ALL", "LAST_7_DAYS", "LAST_30_DAYS", "THIS_MONTH"]>>;
+    sortBy: z.ZodOptional<z.ZodEnum<["name", "room", "rent", "checkOutDate", "status", "createdAt", "dues"]>>;
+    sortOrder: z.ZodDefault<z.ZodEnum<["asc", "desc"]>>;
     search: z.ZodOptional<z.ZodString>;
     page: z.ZodDefault<z.ZodNumber>;
     limit: z.ZodDefault<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     limit: number;
+    sortOrder: "asc" | "desc";
     page: number;
     search?: string | undefined;
     status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
+    sortBy?: "room" | "status" | "name" | "createdAt" | "rent" | "checkOutDate" | "dues" | undefined;
     propertyId?: string | undefined;
+    kycStatus?: "PENDING" | "ALL" | "UPLOADED" | undefined;
+    evictionStatus?: "ALL" | "ON_NOTICE" | "ACTIVE_STAY" | undefined;
+    moveInPreset?: "ALL" | "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | undefined;
+    createdAtPreset?: "ALL" | "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | undefined;
 }, {
     search?: string | undefined;
     status?: "ACTIVE" | "ARCHIVED" | "PENDING_MOVE_IN" | "NOTICE_PERIOD" | "MOVED_OUT" | undefined;
     limit?: number | undefined;
+    sortBy?: "room" | "status" | "name" | "createdAt" | "rent" | "checkOutDate" | "dues" | undefined;
+    sortOrder?: "asc" | "desc" | undefined;
     page?: number | undefined;
     propertyId?: string | undefined;
+    kycStatus?: "PENDING" | "ALL" | "UPLOADED" | undefined;
+    evictionStatus?: "ALL" | "ON_NOTICE" | "ACTIVE_STAY" | undefined;
+    moveInPreset?: "ALL" | "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | undefined;
+    createdAtPreset?: "ALL" | "LAST_7_DAYS" | "LAST_30_DAYS" | "THIS_MONTH" | undefined;
 }>;
 export type QueryResidentsDto = z.infer<typeof queryResidentsSchema>;
 export declare const noticeSchema: z.ZodObject<{

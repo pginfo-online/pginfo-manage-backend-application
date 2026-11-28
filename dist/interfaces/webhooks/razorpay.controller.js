@@ -25,14 +25,14 @@ let RazorpayWebhookController = class RazorpayWebhookController {
         const rawBody = req.rawBody;
         if (!rawBody)
             throw new BadRequestException('Missing raw webhook body');
-        return this.razorpayWebhookService.handleWebhook(rawBody.toString('utf8'), signature, eventId);
+        return this.razorpayWebhookService.handleWebhook(rawBody, signature, eventId);
     }
 };
 __decorate([
     Post('razorpay'),
     HttpCode(HttpStatus.OK),
     ApiOperation({
-        summary: 'Authoritative Razorpay webhook handler for Autopay mandates, charges, splits, and failures',
+        summary: 'Authoritative Razorpay webhook handler for Autopay mandates, charges, refunds, and failures',
     }),
     ApiResponse({ status: 200, description: 'Webhook processed' }),
     ApiResponse({

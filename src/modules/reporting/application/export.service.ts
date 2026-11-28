@@ -1,3 +1,4 @@
+import { paymentPropertyScope } from '../../finance/domain/collection-lines.js';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { Monetary } from '../../finance/domain/monetary.js';
@@ -36,7 +37,7 @@ export class ExportService {
       where: {
         organizationId: orgId,
         status: 'CONFIRMED',
-        ...(propertyId ? { resident: { propertyId } } : {}),
+        ...paymentPropertyScope(propertyId),
       },
       include: {
         resident: {
@@ -63,9 +64,9 @@ export class ExportService {
       `${p.resident.firstName} ${p.resident.lastName ?? ''}`.trim(),
       p.resident.mobile,
       p.resident.property?.name ?? '',
-      Monetary.toRupees(p.amount),
+      Monetary.toRupees(p.amount - (p.gatewayRefundedAmount ?? 0)),
       p.mode,
-      p.reference ?? p.razorpayPaymentId ?? '',
+      p.razorpayPaymentId ?? p.reference ?? '',
     ]);
 
     return this.toCsv(headers, rows);

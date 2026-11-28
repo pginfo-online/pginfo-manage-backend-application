@@ -1,4 +1,16 @@
 import { z } from 'zod';
+import { isIP } from 'node:net';
+
+const defaultCorsOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5000',
+  'http://localhost:5173',
+  'https://app.pginfo.business',
+  'https://api.pginfo.business',
+  'https://www.pginfo.in',
+  'https://pginfo-manage-new-admin-application.vercel.app',
+];
 
 /**
  * Application environment schema validated at startup.
@@ -12,6 +24,23 @@ export const envSchema = z.object({
     .enum(['development', 'production', 'test'])
     .default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
+  LISTEN_HOST: z.string().trim().min(1).default('0.0.0.0'),
+  TRUSTED_PROXY_IPS: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((ip) => ip.trim())
+        .filter(Boolean),
+    )
+    .pipe(
+      z.array(
+        z
+          .string()
+          .refine((ip) => isIP(ip) !== 0, 'Expected a proxy IP address'),
+      ),
+    ),
   API_PREFIX: z.string().default('api/v1'),
   APP_NAME: z.string().default('pginfo'),
   LOG_LEVEL: z
@@ -45,6 +74,9 @@ export const envSchema = z.object({
   RAZORPAY_KEY_ID: z.string().optional().default(''),
   RAZORPAY_KEY_SECRET: z.string().optional().default(''),
   RAZORPAY_WEBHOOK_SECRET: z.string().optional().default(''),
+  PAYOUT_BANK_ENCRYPTION_KEY: z
+    .union([z.literal(''), z.string().regex(/^[a-fA-F0-9]{64}$/)])
+    .default(''),
   PLATFORM_FEE_PAISE: z.coerce.number().int().nonnegative().default(3000), // Platform cut in paise (e.g. ₹30.00 = 3000 paise)
 
   // ── Email (Resend) ───────────────────────────────────────────
@@ -82,14 +114,41 @@ export const envSchema = z.object({
   // ── CORS ─────────────────────────────────────────────────────
   CORS_ORIGINS: z
     .string()
-    .default(
-      'http://localhost:3000,http://localhost:3001,http://localhost:5000,http://localhost:5173',
-    )
-    .transform((v) => v.split(',')),
+    .default('')
+    .transform((value) => {
+      const origins = value
+        .split(',')
+        .map((origin) => origin.trim().replace(/\/+$/, ''))
+        .filter(Boolean);
+      return origins.length ? [...new Set(origins)] : defaultCorsOrigins;
+    }),
 
   // ── Rate Limiting ────────────────────────────────────────────
   THROTTLE_TTL: z.coerce.number().int().positive().default(60_000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(100),
+
+  // ── SMS OTP Service ──────────────────────────────────────────
+  SMS_GATEWAY_URL: z.string().trim().optional().default(''),
+  SMS_GATEWAY_MOBILE: z.string().trim().optional().default(''),
+  SMS_GATEWAY_PASSWORD: z.string().optional().default(''),
+  SMS_GATEWAY_APIKEY: z.string().trim().optional().default(''),
+  SMS_GATEWAY_PEID: z.string().trim().optional().default(''),
+  SMS_GATEWAY_TEMPLATE_ID: z.string().trim().optional().default(''),
+  SMS_GATEWAY_SENDER_ID: z.string().trim().optional().default(''),
+  SMS_DEFAULT_APP_HASH: z.string().trim().optional().default(''),
+  OTP_EXPIRY_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
+  OTP_RESEND_COOLDOWN_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(10)
+    .max(300)
+    .default(30),
+  OTP_LENGTH: z.coerce.number().pipe(z.literal(4)).default(4),
+  OTP_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  SMS_SIMULATE: z
+    .string()
+    .transform((v) => v === 'true')
+    .default('false'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

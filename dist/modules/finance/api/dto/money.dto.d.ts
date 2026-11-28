@@ -90,8 +90,8 @@ export declare const moneyQuerySchema: z.ZodObject<{
     endDate?: string | undefined;
 }, {
     search?: string | undefined;
-    sort?: "DATE_ASC" | "DATE_DESC" | "ROOM" | "AMOUNT_DESC" | "AMOUNT_ASC" | undefined;
     type?: "OTHER" | "RENT" | "SECURITY_DEPOSIT" | "ELECTRICITY" | "MAINTENANCE" | "WIFI" | undefined;
+    sort?: "DATE_ASC" | "DATE_DESC" | "ROOM" | "AMOUNT_DESC" | "AMOUNT_ASC" | undefined;
     date?: "ALL" | "TODAY" | "YESTERDAY" | "30_DAYS" | "3_MONTHS" | "6_MONTHS" | undefined;
     mode?: "OTHER" | "CASH" | "UPI" | "BANK_TRANSFER" | "CHEQUE" | "RAZORPAY" | undefined;
     limit?: number | undefined;

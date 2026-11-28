@@ -10,20 +10,20 @@ export declare class AdminGovernanceService {
     listCases(query: AdminCasesQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         createdBy: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
         assignedTo: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         } | null;
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -42,8 +42,8 @@ export declare class AdminGovernanceService {
     }>>;
     createCase(dto: CreateAdminCaseDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -62,8 +62,8 @@ export declare class AdminGovernanceService {
     }>;
     updateCase(id: string, dto: UpdateAdminCaseDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.AdminCaseStatus;
         type: import("@prisma/client").$Enums.AdminCaseType;
+        status: import("@prisma/client").$Enums.AdminCaseStatus;
         createdAt: Date;
         updatedAt: Date;
         createdByUserId: string;
@@ -83,7 +83,7 @@ export declare class AdminGovernanceService {
     listSettings(query: AdminListQueryDto): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         updatedBy: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
         };
     } & {

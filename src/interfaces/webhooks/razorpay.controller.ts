@@ -22,7 +22,7 @@ export class RazorpayWebhookController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Authoritative Razorpay webhook handler for Autopay mandates, charges, splits, and failures',
+      'Authoritative Razorpay webhook handler for Autopay mandates, charges, refunds, and failures',
   })
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   @ApiResponse({
@@ -43,7 +43,7 @@ export class RazorpayWebhookController {
     if (!rawBody) throw new BadRequestException('Missing raw webhook body');
 
     return this.razorpayWebhookService.handleWebhook(
-      rawBody.toString('utf8'),
+      rawBody,
       signature,
       eventId,
     );

@@ -8,6 +8,8 @@ var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
 import { Injectable, ConflictException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { BankAccountCipher } from '../infrastructure/bank-account-cipher.js';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
 import { NotFoundError } from '../../../common/errors/index.js';
@@ -15,9 +17,11 @@ import { buildOffsetResponse } from '../../../common/pagination/index.js';
 let PayoutsService = class PayoutsService {
     prisma;
     razorpayAdapter;
-    constructor(prisma, razorpayAdapter) {
+    bankCipher;
+    constructor(prisma, razorpayAdapter, bankCipher) {
         this.prisma = prisma;
         this.razorpayAdapter = razorpayAdapter;
+        this.bankCipher = bankCipher;
     }
     maskAccountNumber(accountNumber) {
         const clean = accountNumber.replace(/\s+/g, '');
@@ -27,86 +31,67 @@ let PayoutsService = class PayoutsService {
         return '•'.repeat(clean.length - 4) + last4;
     }
     async onboardOwner(dto, orgId, userId) {
-        const organization = await this.prisma.organization.findUnique({
-            where: { id: orgId },
-        });
-        if (!organization) {
-            throw new NotFoundError('Organization', orgId);
-        }
-        if (dto.propertyId) {
-            const property = await this.prisma.property.findFirst({
+        if (dto.propertyId &&
+            !(await this.prisma.property.findFirst({
                 where: { id: dto.propertyId, organizationId: orgId },
-            });
-            if (!property) {
-                throw new NotFoundError('Property', dto.propertyId);
-            }
-        }
-        const maskedAcc = this.maskAccountNumber(dto.accountNumber);
-        const routeAccount = await this.razorpayAdapter.createLinkedAccount({
-            email: dto.email,
-            phone: dto.phone,
-            legalBusinessName: dto.businessType === 'individual' ? dto.ownerName : dto.businessName,
-            businessType: dto.businessType,
-            panNumber: dto.panNumber,
-            accountNumber: dto.accountNumber,
-            ifscCode: dto.ifscCode,
-            beneficiaryName: dto.ownerName,
-            notes: {
-                organizationId: orgId,
-                propertyId: dto.propertyId || '',
-            },
-        });
-        const { payoutAccount, alreadyExisted } = await this.prisma.$transaction(async (tx) => {
-            const inserted = await tx.landlordPayoutAccount.createMany({
-                skipDuplicates: true,
-                data: {
-                    organizationId: orgId,
-                    userId,
-                    propertyId: dto.propertyId,
-                    razorpayAccountId: routeAccount.accountId,
-                    businessName: dto.businessName,
-                    businessType: dto.businessType,
-                    accountNumberMasked: maskedAcc,
-                    ifscCode: dto.ifscCode,
-                    beneficiaryName: dto.ownerName,
-                    email: dto.email,
-                    phone: dto.phone,
-                    status: routeAccount.verified ? 'ACTIVE' : 'PENDING',
-                    kycStatus: routeAccount.verified ? 'VERIFIED' : 'SUBMITTED',
-                    metadata: { routeProductId: routeAccount.productId ?? null },
-                },
-            });
-            const payoutAccount = await tx.landlordPayoutAccount.findFirst({
+                select: { id: true },
+            })))
+            throw new NotFoundError('Property', dto.propertyId);
+        return this.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw `SELECT id FROM organizations WHERE id=${orgId}::uuid FOR UPDATE`;
+            const accountNumberMasked = this.maskAccountNumber(dto.accountNumber);
+            const candidates = await tx.landlordPayoutAccount.findMany({
                 where: {
                     organizationId: orgId,
-                    razorpayAccountId: routeAccount.accountId,
+                    propertyId: dto.propertyId ?? null,
+                    ifscCode: dto.ifscCode,
+                    accountNumberMasked,
+                    accountNumberEncrypted: { not: null },
                 },
             });
-            if (!payoutAccount)
-                throw new ConflictException('Razorpay returned an account already registered elsewhere');
-            if (inserted.count)
+            const existing = candidates.find((account) => this.bankCipher.decrypt(account.accountNumberEncrypted, account.id) === dto.accountNumber);
+            const id = existing?.id ?? randomUUID();
+            const bank = existing ??
+                (await tx.landlordPayoutAccount.create({
+                    data: {
+                        id,
+                        organizationId: orgId,
+                        userId,
+                        propertyId: dto.propertyId,
+                        razorpayAccountId: `manual_${id}`,
+                        businessName: dto.businessName,
+                        businessType: dto.businessType,
+                        accountNumberMasked,
+                        accountNumberEncrypted: this.bankCipher.encrypt(dto.accountNumber, id),
+                        ifscCode: dto.ifscCode,
+                        beneficiaryName: dto.ownerName,
+                        email: dto.email,
+                        phone: dto.phone,
+                        status: 'PENDING',
+                        kycStatus: 'SUBMITTED',
+                    },
+                }));
+            if (!existing)
                 await tx.auditLog.create({
                     data: {
                         organizationId: orgId,
                         userId,
-                        action: 'payouts.onboard_owner',
+                        action: 'payouts.bank_submitted',
                         entityType: 'LandlordPayoutAccount',
-                        entityId: payoutAccount.id,
+                        entityId: id,
                     },
                 });
-            return { payoutAccount, alreadyExisted: inserted.count === 0 };
+            return {
+                id,
+                businessName: bank.businessName,
+                beneficiaryName: bank.beneficiaryName,
+                accountNumberMasked: bank.accountNumberMasked,
+                ifscCode: bank.ifscCode,
+                status: bank.status,
+                kycStatus: bank.kycStatus,
+                alreadyExisted: Boolean(existing),
+            };
         });
-        return {
-            id: payoutAccount.id,
-            accountId: payoutAccount.razorpayAccountId,
-            businessName: payoutAccount.businessName,
-            beneficiaryName: payoutAccount.beneficiaryName,
-            accountNumberMasked: payoutAccount.accountNumberMasked,
-            ifscCode: payoutAccount.ifscCode,
-            status: payoutAccount.status,
-            kycStatus: payoutAccount.kycStatus,
-            alreadyExisted,
-        };
     }
     async refreshVerification(id, orgId) {
         const account = await this.prisma.landlordPayoutAccount.findFirst({
@@ -114,6 +99,10 @@ let PayoutsService = class PayoutsService {
         });
         if (!account)
             throw new NotFoundError('Bank account', id);
+        if (account.razorpayAccountId.startsWith('manual_'))
+            return {
+                verified: account.status === 'ACTIVE' && account.kycStatus === 'VERIFIED',
+            };
         const metadata = account.metadata;
         const productId = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
             ? metadata.routeProductId
@@ -139,19 +128,12 @@ let PayoutsService = class PayoutsService {
     }
     async getActivePayoutAccount(orgId, propertyId) {
         const account = await this.prisma.landlordPayoutAccount.findFirst({
+            omit: { accountNumberEncrypted: true },
             where: {
                 organizationId: orgId,
                 status: 'ACTIVE',
                 kycStatus: 'VERIFIED',
-                razorpayAccountId: { not: { startsWith: 'acc_sim_' } },
-                AND: [
-                    {
-                        metadata: {
-                            path: ['routeProductId'],
-                            string_starts_with: 'acc_prd_',
-                        },
-                    },
-                ],
+                accountNumberEncrypted: { not: null },
                 ...(propertyId ? { OR: [{ propertyId }, { propertyId: null }] } : {}),
             },
             orderBy: [
@@ -206,6 +188,7 @@ let PayoutsService = class PayoutsService {
                 skip: offset,
                 take: query.limit,
                 orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                omit: { accountNumberEncrypted: true },
                 include: {
                     property: { select: { id: true, name: true } },
                     user: {
@@ -221,7 +204,8 @@ let PayoutsService = class PayoutsService {
 PayoutsService = __decorate([
     Injectable(),
     __metadata("design:paramtypes", [PrismaService,
-        RazorpayAdapter])
+        RazorpayAdapter,
+        BankAccountCipher])
 ], PayoutsService);
 export { PayoutsService };
 //# sourceMappingURL=payouts.service.js.map

@@ -13,8 +13,8 @@ export declare class BillingService {
     }>;
     createCharge(dto: CreateChargeDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -36,8 +36,8 @@ export declare class BillingService {
     }>;
     discount(id: string, dto: DiscountDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -72,8 +72,8 @@ export declare class BillingService {
         };
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -120,8 +120,8 @@ export declare class BillingService {
         }[];
     } & {
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;
@@ -143,8 +143,8 @@ export declare class BillingService {
     }>;
     cancelBill(id: string, orgId: string, userId: string, reason?: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.BillingStatus;
         type: import("@prisma/client").$Enums.BillingType;
+        status: import("@prisma/client").$Enums.BillingStatus;
         createdAt: Date;
         updatedAt: Date;
         organizationId: string;

@@ -1,3 +1,5 @@
+import { calendarDateSchema } from '../../../../common/validation/date.js';
+import { dateKeyInTimeZone } from '../../../../common/time/property-date.js';
 import { AdminCasePriority, AdminCaseStatus, AdminCaseType, BedStatus, KycStatus, PlatformAdminStatus, PlatformRole, PropertyStatus, RoomStatus, } from '@prisma/client';
 import { z } from 'zod';
 import { PLATFORM_PERMISSIONS } from '../../domain/admin-permissions.js';
@@ -107,6 +109,23 @@ export const adminPaymentsQuerySchema = adminListQuerySchema
     to: z.coerce.date().optional(),
 })
     .superRefine(validatePeriod);
+const financeDate = calendarDateSchema.refine((value) => value <= dateKeyInTimeZone(new Date(), 'Asia/Kolkata'), 'Enter a date on or before today');
+export const applyDisputedCaptureSchema = z.object({
+    reason: z.string().trim().min(5).max(500),
+});
+export const reconcileSettlementSchema = z.object({ settledOn: financeDate });
+export const prepareManualPayoutSchema = z.object({
+    payoutAccountId: uuid,
+    amount: z.number().int().positive().max(2147483647),
+});
+export const recordManualPayoutSchema = z.object({
+    bankReference: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z0-9-]{6,64}$/),
+    paidOn: financeDate,
+});
 export const adminPayoutsQuerySchema = adminListQuerySchema.extend({
     organizationId: uuid.optional(),
     status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'REJECTED']).optional(),

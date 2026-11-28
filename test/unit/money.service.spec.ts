@@ -160,7 +160,7 @@ describe('Money payment consistency', () => {
       service.record({ ...input(), amount: 8000 }, 'org', 'user'),
     ).rejects.toThrow();
   });
-  it('does not partially settle a linked online invoice', async () => {
+  it('accepts a partial collection and leaves its linked invoice open', async () => {
     db.billingRecord.findMany.mockResolvedValue([
       {
         id: billId,
@@ -171,10 +171,11 @@ describe('Money payment consistency', () => {
         _count: { rentInvoices: 1 },
       },
     ]);
-    await expect(service.record(input(), 'org', 'user')).rejects.toThrow(
-      'settled in full',
-    );
-    expect(db.payment.create).not.toHaveBeenCalled();
+    const result = await service.record(input(), 'org', 'user');
+    expect(result.payments).toEqual([
+      expect.objectContaining({ amount: 9000 }),
+    ]);
+    expect(db.rentInvoice.updateMany).not.toHaveBeenCalled();
   });
   it('exports in bounded batches and neutralizes spreadsheet formula injection', async () => {
     db.expense = {

@@ -5,7 +5,6 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
   let service: MandatesService;
   let mockPrisma: any;
   let mockRazorpayAdapter: any;
-  let mockPayoutsService: any;
   let mockWhatsAppAdapter: any;
 
   const orgId = '00000000-0000-0000-0000-000000000001';
@@ -66,13 +65,6 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
         .mockResolvedValue({ id: 'sub_rent_456', status: 'cancelled' }),
     };
 
-    mockPayoutsService = {
-      getActivePayoutAccount: vi.fn().mockResolvedValue({
-        id: 'payout-1',
-        razorpayAccountId: 'acc_route_landlord',
-      }),
-    };
-
     mockWhatsAppAdapter = {
       send: vi.fn().mockResolvedValue({ success: true, messageId: 'wa_123' }),
     };
@@ -80,7 +72,6 @@ describe('MandatesService (Rent Autopay Mandates & WhatsApp Invite)', () => {
     service = new MandatesService(
       mockPrisma as any,
       mockRazorpayAdapter as any,
-      mockPayoutsService as any,
       mockWhatsAppAdapter as any,
     );
   });

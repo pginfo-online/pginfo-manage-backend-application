@@ -21,7 +21,6 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
     mockPayoutsService = {
       onboardOwner: vi.fn().mockResolvedValue({
         id: 'payout-1',
-        accountId: 'acc_route_123',
         businessName: 'Sharma Properties',
         status: 'ACTIVE',
       }),
@@ -66,7 +65,6 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
         businessType: 'individual' as const,
         accountNumber: '123456789012',
         ifscCode: 'HDFC0001234',
-        routeTermsAccepted: true as const,
       };
 
       const res = await payoutsController.onboardOwner(dto, orgId, userId);
@@ -75,7 +73,7 @@ describe('Autopay Controllers (HTTP Endpoints)', () => {
         orgId,
         userId,
       );
-      expect(res.accountId).toBe('acc_route_123');
+      expect(res.id).toBe('payout-1');
     });
   });
 

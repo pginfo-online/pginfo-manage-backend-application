@@ -22,8 +22,8 @@ export declare class InvoicesService {
         mandate: {
             landlordPayoutAccount: {
                 businessName: string;
-                razorpayAccountId: string;
                 beneficiaryName: string;
+                razorpayAccountId: string;
             } | null;
             id: string;
             status: import("@prisma/client").$Enums.MandateStatus;

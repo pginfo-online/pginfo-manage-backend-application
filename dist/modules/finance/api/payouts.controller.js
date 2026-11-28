@@ -40,21 +40,9 @@ __decorate([
     HttpCode(HttpStatus.CREATED),
     RequireOrgRoles('OWNER', 'ADMIN'),
     ApiOperation({
-        summary: 'Onboard landlord with KYC & bank details to Razorpay Route',
-        description: 'Creates a linked sub-merchant account via Razorpay Route and records the account_id for split payouts.',
+        summary: 'Submit owner bank details for manual payout review',
     }),
-    ApiResponse({
-        status: 201,
-        description: 'Owner successfully onboarded to Razorpay Route',
-    }),
-    ApiResponse({
-        status: 400,
-        description: 'Invalid KYC or bank account details',
-    }),
-    ApiResponse({
-        status: 409,
-        description: 'Owner payout account already exists',
-    }),
+    ApiResponse({ status: 201, description: 'Bank details saved for review' }),
     __param(0, Body(new ZodValidationPipe(onboardOwnerSchema))),
     __param(1, CurrentOrgId()),
     __param(2, CurrentUserId()),
@@ -97,7 +85,7 @@ __decorate([
     __metadata("design:returntype", Promise)
 ], PayoutsController.prototype, "getActiveAccount", null);
 PayoutsController = __decorate([
-    ApiTags('Finance: Landlord Payouts & Route'),
+    ApiTags('Finance: Landlord Payout Accounts'),
     Controller('payouts'),
     UseGuards(JwtAuthGuard, RequireOrgGuard, OrgRolesGuard),
     ApiBearerAuth('JWT'),

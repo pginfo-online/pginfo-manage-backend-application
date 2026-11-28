@@ -34,15 +34,6 @@ export const onboardOwnerSchema = z.object({
         .trim()
         .toUpperCase()
         .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code (e.g. HDFC0001234)'),
-    panNumber: z
-        .string()
-        .trim()
-        .toUpperCase()
-        .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN number')
-        .optional(),
-    routeTermsAccepted: z.literal(true, {
-        errorMap: () => ({ message: 'Accept Razorpay Route terms to continue' }),
-    }),
     propertyId: z.string().uuid().optional(),
 });
 export const queryPayoutAccountsSchema = z.object({

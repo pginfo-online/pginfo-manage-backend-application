@@ -57,6 +57,9 @@ try {
   if (!env.RAZORPAY_KEY_ID?.startsWith('rzp_live_') || !env.RAZORPAY_KEY_SECRET || !env.RAZORPAY_WEBHOOK_SECRET) {
     throw new Error('Configure live Razorpay credentials and the matching webhook signing secret');
   }
+  if (!/^[a-fA-F0-9]{64}$/.test(env.PAYOUT_BANK_ENCRYPTION_KEY ?? '')) {
+    throw new Error('Configure and retain a dedicated PAYOUT_BANK_ENCRYPTION_KEY for bank details');
+  }
   const schema = (await import('../dist/config/env.schema.js')).envSchema;
   schema.parse(env);
   for (const value of Object.values(env)) {

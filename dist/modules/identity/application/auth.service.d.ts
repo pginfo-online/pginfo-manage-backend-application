@@ -1,11 +1,12 @@
 import { PrismaService } from '../../../platform/database/index.js';
 import { TokenService, type TokenPair } from './token.service.js';
-import type { RegisterDto, LoginDto } from '../api/dto/auth.dto.js';
+import { OtpService } from './otp.service.js';
+import type { RegisterDto, LoginDto, OtpLoginDto, OtpRegisterDto } from '../api/dto/auth.dto.js';
 export interface AuthResult {
     tokens: TokenPair;
     user: {
         id: string;
-        email: string;
+        email: string | null;
         firstName: string;
         lastName: string | null;
         mobile: string | null;
@@ -16,8 +17,9 @@ export interface AuthResult {
 export declare class AuthService {
     private readonly prisma;
     private readonly tokenService;
+    private readonly otpService?;
     private readonly logger;
-    constructor(prisma: PrismaService, tokenService: TokenService);
+    constructor(prisma: PrismaService, tokenService: TokenService, otpService?: OtpService | undefined);
     register(dto: RegisterDto, meta?: {
         ipAddress?: string;
         userAgent?: string;
@@ -26,6 +28,15 @@ export declare class AuthService {
         ipAddress?: string;
         userAgent?: string;
     }): Promise<AuthResult>;
+    loginWithOtp(dto: OtpLoginDto, meta?: {
+        ipAddress?: string;
+        userAgent?: string;
+    }): Promise<AuthResult>;
+    registerWithOtp(dto: OtpRegisterDto, meta?: {
+        ipAddress?: string;
+        userAgent?: string;
+    }): Promise<AuthResult>;
+    private issueUserSession;
     refresh(rawToken: string, meta?: {
         ipAddress?: string;
         userAgent?: string;
@@ -36,7 +47,7 @@ export declare class AuthService {
     logout(rawToken: string, userId: string): Promise<void>;
     getMe(userId: string): Promise<{
         id: string;
-        email: string;
+        email: string | null;
         mobile: string | null;
         firstName: string;
         lastName: string | null;

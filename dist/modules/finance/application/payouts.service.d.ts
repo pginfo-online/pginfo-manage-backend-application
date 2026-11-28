@@ -1,14 +1,15 @@
+import { BankAccountCipher } from '../infrastructure/bank-account-cipher.js';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
 import type { OnboardOwnerDto, QueryPayoutAccountsDto } from '../api/dto/payout.dto.js';
 export declare class PayoutsService {
     private readonly prisma;
     private readonly razorpayAdapter;
-    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter);
+    private readonly bankCipher;
+    constructor(prisma: PrismaService, razorpayAdapter: RazorpayAdapter, bankCipher: BankAccountCipher);
     private maskAccountNumber;
     onboardOwner(dto: OnboardOwnerDto, orgId: string, userId: string): Promise<{
         id: string;
-        accountId: string;
         businessName: string;
         beneficiaryName: string;
         accountNumberMasked: string;
@@ -29,20 +30,20 @@ export declare class PayoutsService {
         userId: string;
         organizationId: string;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        propertyId: string | null;
         phone: string;
+        propertyId: string | null;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
         businessName: string;
         businessType: string;
         ifscCode: string;
-        kycStatus: import("@prisma/client").$Enums.KycStatus;
-        razorpayAccountId: string;
-        accountNumberMasked: string;
         beneficiaryName: string;
+        accountNumberMasked: string;
+        razorpayAccountId: string;
     }>;
     queryPayoutAccounts(query: QueryPayoutAccountsDto, orgId: string): Promise<import("../../../common/pagination/index.js").PaginatedResponse<{
         user: {
             id: string;
-            email: string;
+            email: string | null;
             firstName: string;
             lastName: string | null;
         };
@@ -59,14 +60,14 @@ export declare class PayoutsService {
         userId: string;
         organizationId: string;
         metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        propertyId: string | null;
         phone: string;
+        propertyId: string | null;
+        kycStatus: import("@prisma/client").$Enums.KycStatus;
         businessName: string;
         businessType: string;
         ifscCode: string;
-        kycStatus: import("@prisma/client").$Enums.KycStatus;
-        razorpayAccountId: string;
-        accountNumberMasked: string;
         beneficiaryName: string;
+        accountNumberMasked: string;
+        razorpayAccountId: string;
     }>>;
 }

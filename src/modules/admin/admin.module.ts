@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { FinanceModule } from '../finance/finance.module.js';
+import { AdminCollectionsService } from './application/admin-collections.service.js';
 import { AdminAccessController } from './api/admin-access.controller.js';
 import { AdminDashboardController } from './api/admin-dashboard.controller.js';
 import { AdminPlatformController } from './api/admin-platform.controller.js';
@@ -12,6 +14,7 @@ import { AdminCommandService } from './application/admin-command.service.js';
 import { AdminGovernanceService } from './application/admin-governance.service.js';
 
 @Module({
+  imports: [FinanceModule],
   controllers: [
     AdminAccessController,
     AdminDashboardController,
@@ -20,6 +23,7 @@ import { AdminGovernanceService } from './application/admin-governance.service.j
     AdminGovernanceController,
   ],
   providers: [
+    AdminCollectionsService,
     PlatformAdminGuard,
     AdminAuditService,
     AdminAccessService,

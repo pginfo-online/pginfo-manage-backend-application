@@ -12,14 +12,18 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
 };
 import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards, } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from '../application/auth.service.js';
-import { registerSchema, loginSchema, refreshTokenSchema, } from './dto/auth.dto.js';
+import { OtpService } from '../application/otp.service.js';
+import { registerSchema, loginSchema, refreshTokenSchema, sendOtpSchema, resendOtpSchema, otpLoginSchema, otpRegisterSchema, } from './dto/auth.dto.js';
 import { ZodValidationPipe } from '../../../common/validation/index.js';
 import { JwtAuthGuard, CurrentUser, CurrentUserId, } from '../../../platform/authentication/index.js';
 let AuthController = class AuthController {
     authService;
-    constructor(authService) {
+    otpService;
+    constructor(authService, otpService) {
         this.authService = authService;
+        this.otpService = otpService;
     }
     async register(dto, req) {
         return this.authService.register(dto, {
@@ -29,6 +33,30 @@ let AuthController = class AuthController {
     }
     async login(dto, req) {
         return this.authService.login(dto, {
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+        });
+    }
+    async sendOtp(dto, req) {
+        return this.otpService.sendOtp(dto, {
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+        });
+    }
+    async resendOtp(dto, req) {
+        return this.otpService.sendOtp(dto, {
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+        });
+    }
+    async otpLogin(dto, req) {
+        return this.authService.loginWithOtp(dto, {
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+        });
+    }
+    async otpRegister(dto, req) {
+        return this.authService.registerWithOtp(dto, {
             ipAddress: req.ip,
             userAgent: req.headers['user-agent'],
         });
@@ -63,7 +91,9 @@ __decorate([
 __decorate([
     Post('login'),
     HttpCode(HttpStatus.OK),
-    ApiOperation({ summary: 'Authenticate with email and password' }),
+    ApiOperation({
+        summary: 'Authenticate with an email or mobile number and password',
+    }),
     ApiResponse({ status: 200, description: 'Successfully authenticated' }),
     ApiResponse({ status: 401, description: 'Invalid credentials' }),
     __param(0, Body(new ZodValidationPipe(loginSchema))),
@@ -72,6 +102,63 @@ __decorate([
     __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], AuthController.prototype, "login", null);
+__decorate([
+    Post('otp/send'),
+    UseGuards(ThrottlerGuard),
+    HttpCode(HttpStatus.OK),
+    Throttle({ default: { limit: 10, ttl: 60_000 } }),
+    ApiOperation({ summary: 'Send a 4-digit OTP for login or registration' }),
+    ApiResponse({ status: 200, description: 'OTP sent successfully' }),
+    ApiResponse({ status: 429, description: 'Cooldown or rate limit active' }),
+    __param(0, Body(new ZodValidationPipe(sendOtpSchema))),
+    __param(1, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "sendOtp", null);
+__decorate([
+    Post('otp/resend'),
+    UseGuards(ThrottlerGuard),
+    HttpCode(HttpStatus.OK),
+    Throttle({ default: { limit: 10, ttl: 60_000 } }),
+    ApiOperation({ summary: 'Resend a 4-digit OTP after cooldown' }),
+    ApiResponse({ status: 200, description: 'OTP resent successfully' }),
+    ApiResponse({ status: 429, description: 'Cooldown or rate limit active' }),
+    __param(0, Body(new ZodValidationPipe(resendOtpSchema))),
+    __param(1, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "resendOtp", null);
+__decorate([
+    Post('otp/login'),
+    UseGuards(ThrottlerGuard),
+    HttpCode(HttpStatus.OK),
+    Throttle({ default: { limit: 15, ttl: 60_000 } }),
+    ApiOperation({ summary: 'Authenticate using mobile number and 4-digit OTP' }),
+    ApiResponse({ status: 200, description: 'Successfully authenticated' }),
+    ApiResponse({ status: 401, description: 'Invalid or expired OTP' }),
+    __param(0, Body(new ZodValidationPipe(otpLoginSchema))),
+    __param(1, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "otpLogin", null);
+__decorate([
+    Post('otp/register'),
+    UseGuards(ThrottlerGuard),
+    HttpCode(HttpStatus.CREATED),
+    Throttle({ default: { limit: 15, ttl: 60_000 } }),
+    ApiOperation({ summary: 'Register a new account with 4-digit mobile OTP' }),
+    ApiResponse({ status: 201, description: 'User successfully registered' }),
+    ApiResponse({ status: 401, description: 'Invalid or expired OTP' }),
+    ApiResponse({ status: 409, description: 'Mobile or email already in use' }),
+    __param(0, Body(new ZodValidationPipe(otpRegisterSchema))),
+    __param(1, Req()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", Promise)
+], AuthController.prototype, "otpRegister", null);
 __decorate([
     Post('refresh'),
     HttpCode(HttpStatus.OK),
@@ -111,7 +198,8 @@ __decorate([
 AuthController = __decorate([
     ApiTags('Authentication'),
     Controller('auth'),
-    __metadata("design:paramtypes", [AuthService])
+    __metadata("design:paramtypes", [AuthService,
+        OtpService])
 ], AuthController);
 export { AuthController };
 //# sourceMappingURL=auth.controller.js.map

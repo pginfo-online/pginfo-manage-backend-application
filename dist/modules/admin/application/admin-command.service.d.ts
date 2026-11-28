@@ -16,8 +16,8 @@ export declare class AdminCommandService {
     }>;
     updatePropertyStatus(id: string, dto: UpdatePropertyStatusDto, actor: PlatformAdminContext, request?: AdminRequestMetadata): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -80,8 +80,8 @@ export declare class AdminCommandService {
         status: import("@prisma/client").$Enums.PayoutAccountStatus;
         updatedAt: Date;
         organizationId: string;
-        businessName: string;
         kycStatus: import("@prisma/client").$Enums.KycStatus;
+        businessName: string;
         accountNumberMasked: string;
     }>;
 }

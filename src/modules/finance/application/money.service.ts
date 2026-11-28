@@ -1,3 +1,7 @@
+import {
+  confirmedCollectionLines,
+  paymentPropertyScope,
+} from '../domain/collection-lines.js';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../platform/database/index.js';
@@ -153,8 +157,14 @@ export class MoneyService {
         to = new Date(from);
       }
       if (q.date === '30_DAYS') from.setUTCDate(from.getUTCDate() - 29);
-      if (q.date === '3_MONTHS') from.setUTCMonth(from.getUTCMonth() - 3);
-      if (q.date === '6_MONTHS') from.setUTCMonth(from.getUTCMonth() - 6);
+      if (q.date === '3_MONTHS' || q.date === '6_MONTHS') {
+        const month = today.getUTCMonth() - (q.date === '3_MONTHS' ? 3 : 6);
+        const year = today.getUTCFullYear();
+        const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        from = new Date(
+          Date.UTC(year, month, Math.min(today.getUTCDate(), lastDay)),
+        );
+      }
     }
     const conditions = [
       Prisma.sql`b.organization_id = ${org}::uuid`,
@@ -163,8 +173,14 @@ export class MoneyService {
     ];
     if (q.propertyId)
       conditions.push(Prisma.sql`b.property_id = ${q.propertyId}::uuid`);
-    if (from) conditions.push(Prisma.sql`b.due_date >= ${from}`);
-    if (to) conditions.push(Prisma.sql`b.due_date <= ${to}`);
+    if (from)
+      conditions.push(
+        Prisma.sql`b.due_date >= ${from.toISOString().slice(0, 10)}::date`,
+      );
+    if (to)
+      conditions.push(
+        Prisma.sql`b.due_date <= ${to.toISOString().slice(0, 10)}::date`,
+      );
     if (q.defaulter === 'RENT') conditions.push(Prisma.sql`b.type = 'RENT'`);
     if (q.defaulter === 'OTHER') conditions.push(Prisma.sql`b.type <> 'RENT'`);
     if (q.type)
@@ -208,7 +224,7 @@ export class MoneyService {
       ) SELECT (SELECT COUNT(*)::int FROM grouped) AS total,
         (SELECT jsonb_agg(jsonb_build_object(
           'id',g.id,'outstanding',g.outstanding,'dueDate',g."dueDate",
-          'overdueDays',GREATEST(0,${today}::date-g."dueDate"),
+          'overdueDays',GREATEST(0,${today.toISOString().slice(0, 10)}::date-g."dueDate"),
           'resident',jsonb_build_object('id',r.id,'firstName',r.first_name,'lastName',r.last_name,
             'mobile',r.mobile,'whatsappNumber',r.whatsapp_number,'parentName',r.parent_name,
             'parentPhone',r.parent_phone,'propertyId',r.property_id,
@@ -234,17 +250,33 @@ export class MoneyService {
     const end = new Date(
       Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1),
     );
+    const todayKey = today.toISOString().slice(0, 10);
+    const startKey = start.toISOString().slice(0, 10);
+    const endKey = end.toISOString().slice(0, 10);
     const scope = Prisma.sql`organization_id=${org}::uuid ${propertyId ? Prisma.sql`AND property_id=${propertyId}::uuid` : Prisma.empty}`;
     const [dues, collections, expenses, categories, reconciliation] =
       await Promise.all([
         this.prisma.$queryRaw<Record<string, number>[]>(
-          Prisma.sql`SELECT COALESCE(SUM(amount::bigint-paid_amount),0)::float8 AS "allDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE due_date<=${today}),0)::float8 AS "currentDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE due_date>=${start} AND due_date<${end}),0)::float8 AS "monthDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE type='RENT'),0)::float8 AS "unpaidRent" FROM billing_records WHERE ${scope} AND status IN ('ISSUED','DUE','PARTIALLY_PAID','OVERDUE')`,
+          Prisma.sql`SELECT COALESCE(SUM(amount::bigint-paid_amount),0)::float8 AS "allDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE due_date<=${todayKey}::date),0)::float8 AS "currentDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE due_date>=${startKey}::date AND due_date<${endKey}::date),0)::float8 AS "monthDues", COALESCE(SUM(amount::bigint-paid_amount) FILTER(WHERE type='RENT'),0)::float8 AS "unpaidRent" FROM billing_records WHERE ${scope} AND status IN ('ISSUED','DUE','PARTIALLY_PAID','OVERDUE')`,
         ),
         this.prisma.$queryRaw<Record<string, number>[]>(
-          Prisma.sql`SELECT COALESCE(SUM(COALESCE(a.amount,p.amount)),0)::float8 AS "totalCollection", COALESCE(SUM(COALESCE(a.amount,p.amount)) FILTER(WHERE p.collection_date>=${start} AND p.collection_date<${end} AND p.billing_record_id IS NULL AND a.payment_id IS NULL),0)::float8 AS "monthUnattributedCollection", COALESCE(SUM(COALESCE(a.amount,p.amount)) FILTER(WHERE p.collection_date>=${start} AND p.collection_date<${end}),0)::float8 AS "monthCollection", COALESCE(SUM(COALESCE(a.amount,p.amount)) FILTER(WHERE p.collection_date>=${start} AND p.collection_date<${end} AND b.due_date>=${start} AND b.due_date<${end}),0)::float8 AS "monthDuesCollection", COALESCE(SUM(COALESCE(a.amount,p.amount)) FILTER(WHERE p.collection_date>=${start} AND p.collection_date<${end} AND b.type='RENT'),0)::float8 AS "monthRentCollection", COALESCE(SUM(COALESCE(a.amount,p.amount)) FILTER(WHERE p.collection_date>=${start} AND p.collection_date<${end} AND b.type='ELECTRICITY'),0)::float8 AS "monthElectricityCollection" FROM payments p JOIN residents r ON r.id=p.resident_id LEFT JOIN payment_allocations a ON a.payment_id=p.id LEFT JOIN billing_records b ON b.id=COALESCE(a.billing_record_id,p.billing_record_id) WHERE p.organization_id=${org}::uuid AND p.status='CONFIRMED' ${propertyId ? Prisma.sql`AND COALESCE(b.property_id,r.property_id)=${propertyId}::uuid` : Prisma.empty}`,
+          Prisma.sql`
+            WITH collections AS (${confirmedCollectionLines(org, propertyId)})
+            SELECT COALESCE(SUM(amount), 0)::float8 AS "totalCollection",
+              COALESCE(SUM(amount) FILTER (WHERE collection_date >= ${startKey}::date AND collection_date < ${endKey}::date
+                AND category IS NULL), 0)::float8 AS "monthUnattributedCollection",
+              COALESCE(SUM(amount) FILTER (WHERE collection_date >= ${startKey}::date AND collection_date < ${endKey}::date), 0)::float8 AS "monthCollection",
+              COALESCE(SUM(amount) FILTER (WHERE collection_date >= ${startKey}::date AND collection_date < ${endKey}::date
+                AND due_date >= ${startKey}::date AND due_date < ${endKey}::date), 0)::float8 AS "monthDuesCollection",
+              COALESCE(SUM(amount) FILTER (WHERE collection_date >= ${startKey}::date AND collection_date < ${endKey}::date
+                AND category = 'RENT'), 0)::float8 AS "monthRentCollection",
+              COALESCE(SUM(amount) FILTER (WHERE collection_date >= ${startKey}::date AND collection_date < ${endKey}::date
+                AND category = 'ELECTRICITY'), 0)::float8 AS "monthElectricityCollection"
+            FROM collections
+          `,
         ),
         this.prisma.$queryRaw<Record<string, number>[]>(
-          Prisma.sql`SELECT COALESCE(SUM(e.amount),0)::float8 AS "monthExpenses", COALESCE(SUM(e.amount) FILTER(WHERE LOWER(c.name) IN ('salary','salaries')),0)::float8 AS "salaryExpenses", COALESCE(SUM(e.amount) FILTER(WHERE LOWER(c.name) IN ('rent','rent expenses')),0)::float8 AS "rentExpenses" FROM expenses e JOIN expense_categories c ON c.id=e.category_id WHERE e.organization_id=${org}::uuid AND e.expense_date>=${start} AND e.expense_date<${end} ${propertyId ? Prisma.sql`AND e.property_id=${propertyId}::uuid` : Prisma.empty}`,
+          Prisma.sql`SELECT COALESCE(SUM(e.amount),0)::float8 AS "monthExpenses", COALESCE(SUM(e.amount) FILTER(WHERE LOWER(c.name) IN ('salary','salaries')),0)::float8 AS "salaryExpenses", COALESCE(SUM(e.amount) FILTER(WHERE LOWER(c.name) IN ('rent','rent expenses')),0)::float8 AS "rentExpenses" FROM expenses e JOIN expense_categories c ON c.id=e.category_id WHERE e.organization_id=${org}::uuid AND e.expense_date>=${startKey}::date AND e.expense_date<${endKey}::date ${propertyId ? Prisma.sql`AND e.property_id=${propertyId}::uuid` : Prisma.empty}`,
         ),
         this.prisma.expenseCategory.count({
           where: { organizationId: org, isActive: true },
@@ -253,10 +285,10 @@ export class MoneyService {
           where: {
             organizationId: org,
             status: 'DISPUTED',
-            ...(propertyId ? { resident: { propertyId } } : {}),
+            ...paymentPropertyScope(propertyId),
           },
           _count: true,
-          _sum: { amount: true },
+          _sum: { amount: true, gatewayRefundedAmount: true },
         }),
       ]);
     return {
@@ -265,7 +297,9 @@ export class MoneyService {
       ...expenses[0],
       activeExpenseCategories: categories,
       reconciliationCount: reconciliation._count,
-      reconciliationAmount: reconciliation._sum.amount ?? 0,
+      reconciliationAmount:
+        (reconciliation._sum.amount ?? 0) -
+        (reconciliation._sum.gatewayRefundedAmount ?? 0),
       asOf: new Date().toISOString(),
     };
   }
@@ -463,13 +497,6 @@ export class MoneyService {
         const bill = bills.find((b) => b.id === a.billingRecordId);
         if (!bill || a.amount > bill.amount - bill.paidAmount)
           throw new ConflictError('Payment breakup exceeds current dues');
-        if (
-          bill._count.rentInvoices > 0 &&
-          a.amount !== bill.amount - bill.paidAmount
-        )
-          throw new ConflictError(
-            'A linked rent invoice must be settled in full to keep online collections in sync',
-          );
       }
       // Apply discounts only to bill capacity left after the explicit cash breakup.
       let remainingDiscount = discount;
@@ -494,12 +521,14 @@ export class MoneyService {
         updates.push(
           Prisma.sql`(${bill.id}::uuid,${bill.version}::int,${amount}::int,${paid}::int,${reduction}::int,${status}::billing_status)`,
         );
-        if (cash && bill._count.rentInvoices > 0) invoiceBills.push(bill.id);
+        if (cash && status === 'PAID' && bill._count.rentInvoices > 0)
+          invoiceBills.push(bill.id);
         if (cash)
           paymentData.push({
             organizationId: org,
             residentId: dto.residentId,
             billingRecordId: bill.id,
+            capturePropertyId: bill.propertyId,
             amount: cash,
             mode: dto.mode,
             status: 'CONFIRMED',
@@ -641,43 +670,35 @@ export class MoneyService {
   }
   async reminder(id: string, org: string) {
     const { resident, totalDues } = await this.paymentContext(id, org);
-    const [pending, invoice] = await Promise.all([
-      this.prisma.payment.findFirst({
-        where: {
-          organizationId: org,
-          residentId: id,
-          status: 'PENDING',
-          amount: totalDues,
-          paymentLinkUrl: { not: null },
-          paymentLinkExpiresAt: { gt: new Date() },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: {
-          paymentLinkUrl: true,
-          paymentLinkExpiresAt: true,
-          amount: true,
-        },
-      }),
-      this.prisma.rentInvoice.findFirst({
-        where: {
-          organizationId: org,
-          tenantId: id,
-          status: { in: ['PENDING', 'FAILED'] },
-          fallbackPaymentUrl: { not: null },
-        },
-        orderBy: { createdAt: 'desc' },
-        select: { fallbackPaymentUrl: true, amount: true },
-      }),
-    ]);
-    const link = pending?.paymentLinkUrl ?? invoice?.fallbackPaymentUrl ?? null;
-    const linkAmount = pending?.amount ?? invoice?.amount ?? 0;
+    const pending =
+      totalDues > 0
+        ? await this.prisma.payment.findFirst({
+            where: {
+              organizationId: org,
+              residentId: id,
+              status: 'PENDING',
+              amount: totalDues,
+              paymentLinkId: { not: null },
+              paymentLinkUrl: { not: null },
+              paymentLinkExpiresAt: { gt: new Date() },
+            },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            select: {
+              paymentLinkUrl: true,
+              paymentLinkExpiresAt: true,
+              amount: true,
+            },
+          })
+        : null;
+    const link = pending?.paymentLinkUrl ?? null;
+    const linkAmount = pending?.amount ?? 0;
     return {
       resident,
       totalDues,
       paymentLink: link,
       linkAmount,
       expiresAt: pending?.paymentLinkExpiresAt ?? null,
-      message: `Hello ${resident.firstName}, your outstanding dues at ${resident.property.name} are ₹${(totalDues / 100).toFixed(2)}. Please clear your dues.${link ? ` Pay ${linkAmount === totalDues ? 'securely' : `the rent invoice of ₹${(linkAmount / 100).toFixed(2)}`} here: ${link}` : ' Please contact the property manager for payment details.'}`,
+      message: `Hello ${resident.firstName}, your outstanding dues at ${resident.property.name} are ₹${(totalDues / 100).toFixed(2)}. Please clear your dues.${link ? ` Pay securely here: ${link}` : ' Please contact the property manager for payment details.'}`,
     };
   }
 
@@ -782,10 +803,8 @@ export class MoneyService {
             status: 'CONFIRMED',
             collectionDate: range,
             ...(q.mode ? { mode: q.mode } : {}),
-            resident: {
-              ...(q.propertyId ? { propertyId: q.propertyId } : {}),
-              ...tenantSearch,
-            },
+            ...paymentPropertyScope(q.propertyId),
+            resident: tenantSearch,
           },
           include: {
             resident: {
@@ -808,7 +827,7 @@ export class MoneyService {
               .join(' '),
             r.resident.property.name,
             r.mode,
-            (r.amount / 100).toFixed(2),
+            ((r.amount - r.gatewayRefundedAmount) / 100).toFixed(2),
             '',
             r.notes,
           ]);

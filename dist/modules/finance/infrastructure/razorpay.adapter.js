@@ -33,6 +33,110 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
             throw new ServiceUnavailableException('Unable to verify payment with the gateway');
         return (await response.json());
     }
+    async createCollectionQr(amount, closeBy, paymentId) {
+        if (!this.canCreateMoneyLinks())
+            throw new ServiceUnavailableException('Configure Razorpay API credentials and webhook secret to create QR codes');
+        let response;
+        try {
+            response = await fetch('https://api.razorpay.com/v1/payments/qr_codes', {
+                method: 'POST',
+                signal: AbortSignal.timeout(12000),
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Basic ${this.getBasicAuthHeader()}`,
+                },
+                body: JSON.stringify({
+                    type: 'upi_qr',
+                    name: 'PGInfo rent collection',
+                    usage: 'single_use',
+                    fixed_amount: true,
+                    payment_amount: amount,
+                    close_by: closeBy,
+                    notes: { moneyPaymentId: paymentId },
+                }),
+            });
+        }
+        catch {
+            throw new ServiceUnavailableException('Razorpay QR service could not be reached');
+        }
+        if (!response.ok)
+            throw new ServiceUnavailableException('Razorpay could not create a payment QR code');
+        const qr = (await response.json());
+        if (!qr.id?.startsWith('qr_') ||
+            !qr.image_url?.startsWith('https://') ||
+            qr.payment_amount !== amount ||
+            !Number.isSafeInteger(qr.close_by) ||
+            qr.close_by <= Math.floor(Date.now() / 1000)) {
+            throw new BadGatewayException('Razorpay returned an invalid QR code');
+        }
+        return {
+            id: qr.id,
+            imageUrl: qr.image_url,
+            expiresAt: new Date(qr.close_by * 1000),
+        };
+    }
+    async readGateway(path) {
+        if (!this.isLiveOrConfigured())
+            throw new ServiceUnavailableException('Razorpay credentials are not configured');
+        try {
+            const result = await fetch(`https://api.razorpay.com/v1/${path}`, {
+                headers: { Authorization: `Basic ${this.getBasicAuthHeader()}` },
+                signal: AbortSignal.timeout(10000),
+            });
+            if (result.ok)
+                return (await result.json());
+        }
+        catch {
+        }
+        throw new ServiceUnavailableException('Razorpay reconciliation data is unavailable');
+    }
+    async findPaymentSettlement(paymentId, amount, date) {
+        const [year, month, day] = date.split('-');
+        const count = 1000;
+        for (let skip = 0; skip < count * 20; skip += count) {
+            const params = new URLSearchParams({
+                year: year,
+                month: month,
+                day: day,
+                count: String(count),
+                skip: String(skip),
+            });
+            const result = await this.readGateway(`settlements/recon/combined?${params}`);
+            const entry = result.items.find((row) => row.entity_id === paymentId && row.type === 'payment' && row.settled);
+            if (entry) {
+                const netAmount = entry.credit - entry.debit;
+                if (!/^setl_[A-Za-z0-9]+$/.test(entry.settlement_id) ||
+                    entry.currency !== 'INR' ||
+                    entry.amount !== amount ||
+                    !Number.isSafeInteger(netAmount) ||
+                    netAmount < 0 ||
+                    netAmount > amount)
+                    throw new BadGatewayException('Razorpay settlement figures do not match the recorded payment');
+                const settlement = await this.readGateway(`settlements/${entry.settlement_id}`);
+                return settlement.status === 'processed' && settlement.utr
+                    ? {
+                        providerId: entry.settlement_id,
+                        bankReference: settlement.utr,
+                        netAmount,
+                    }
+                    : null;
+            }
+            if (result.items.length < count)
+                return null;
+        }
+        throw new ServiceUnavailableException('The Razorpay settlement report is too large to reconcile in one request');
+    }
+    fetchSubscription(id) {
+        if (!/^sub_[A-Za-z0-9]+$/.test(id))
+            throw new BadRequestException('Invalid Razorpay subscription ID');
+        return this.readGateway(`subscriptions/${id}`);
+    }
+    async hasPreviousRouteTransfer(paymentId) {
+        if (!/^pay_[A-Za-z0-9]+$/.test(paymentId))
+            throw new BadRequestException('Invalid Razorpay payment ID');
+        const result = await this.readGateway(`payments/${paymentId}/transfers`);
+        return result.items.length > 0;
+    }
     getKeyId() {
         return this.config.get('RAZORPAY_KEY_ID') || '';
     }
@@ -56,6 +160,8 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
         return Buffer.from(`${keyId}:${keySecret}`).toString('base64');
     }
     secureCompare(a, b) {
+        if (!/^[a-fA-F0-9]{64}$/.test(a))
+            return false;
         try {
             const bufA = Buffer.from(a, 'hex');
             const bufB = Buffer.from(b, 'hex');
@@ -96,6 +202,7 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
             try {
                 const response = await fetch('https://api.razorpay.com/v1/orders', {
                     method: 'POST',
+                    signal: AbortSignal.timeout(12000),
                     headers: {
                         'Content-Type': 'application/json',
                         Authorization: `Basic ${this.getBasicAuthHeader()}`,
@@ -108,9 +215,8 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
                     }),
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    this.logger.error(`Razorpay order creation failed: ${JSON.stringify(errorData)}`);
-                    throw new Error(`Razorpay error: ${response.statusText}`);
+                    this.logger.warn(`Razorpay order creation returned HTTP ${response.status}`);
+                    throw new ServiceUnavailableException('Razorpay could not create the payment order');
                 }
                 const data = (await response.json());
                 return {
@@ -203,7 +309,7 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
         try {
             response = await fetch('https://api.razorpay.com' + path, {
                 method,
-                body,
+                ...(method === 'POST' ? { body } : {}),
                 signal: AbortSignal.timeout(12_000),
                 headers: {
                     'Content-Type': 'application/json',
@@ -333,9 +439,8 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
                     }),
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    this.logger.error(`Razorpay plan creation failed: ${JSON.stringify(errorData)}`);
-                    throw new Error(`Razorpay Plan error: ${response.statusText}`);
+                    this.logger.warn(`Razorpay plan creation returned HTTP ${response.status}`);
+                    throw new ServiceUnavailableException('Razorpay could not create the Autopay plan');
                 }
                 const data = (await response.json());
                 return { planId: data.id };
@@ -372,9 +477,8 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
                     body: JSON.stringify(payload),
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    this.logger.error(`Razorpay subscription creation failed: ${JSON.stringify(errorData)}`);
-                    throw new Error(`Razorpay Subscription error: ${JSON.stringify(errorData)}`);
+                    this.logger.warn(`Razorpay subscription creation returned HTTP ${response.status}`);
+                    throw new ServiceUnavailableException('Razorpay could not create the Autopay subscription');
                 }
                 const data = (await response.json());
                 return {
@@ -508,9 +612,8 @@ let RazorpayAdapter = RazorpayAdapter_1 = class RazorpayAdapter {
                     }),
                 });
                 if (!response.ok) {
-                    const errorData = await response.json();
-                    this.logger.error(`Razorpay payment link creation failed: ${JSON.stringify(errorData)}`);
-                    throw new Error(`Razorpay Payment Link error: ${response.statusText}`);
+                    this.logger.warn(`Razorpay payment link creation returned HTTP ${response.status}`);
+                    throw new ServiceUnavailableException('Razorpay could not create the payment link');
                 }
                 const data = (await response.json());
                 return {

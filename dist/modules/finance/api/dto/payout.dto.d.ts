@@ -7,31 +7,25 @@ export declare const onboardOwnerSchema: z.ZodObject<{
     businessType: z.ZodDefault<z.ZodEnum<["individual", "proprietorship", "partnership", "llp", "private_limited"]>>;
     accountNumber: z.ZodString;
     ifscCode: z.ZodString;
-    panNumber: z.ZodOptional<z.ZodString>;
-    routeTermsAccepted: z.ZodLiteral<true>;
     propertyId: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     email: string;
-    ownerName: string;
     phone: string;
+    ownerName: string;
     businessName: string;
     businessType: "individual" | "proprietorship" | "partnership" | "llp" | "private_limited";
     accountNumber: string;
     ifscCode: string;
-    routeTermsAccepted: true;
     propertyId?: string | undefined;
-    panNumber?: string | undefined;
 }, {
     email: string;
-    ownerName: string;
     phone: string;
+    ownerName: string;
     businessName: string;
     accountNumber: string;
     ifscCode: string;
-    routeTermsAccepted: true;
     propertyId?: string | undefined;
     businessType?: "individual" | "proprietorship" | "partnership" | "llp" | "private_limited" | undefined;
-    panNumber?: string | undefined;
 }>;
 export type OnboardOwnerDto = z.infer<typeof onboardOwnerSchema>;
 export declare const queryPayoutAccountsSchema: z.ZodObject<{

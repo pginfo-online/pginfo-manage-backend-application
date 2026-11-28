@@ -24,13 +24,13 @@ export const recordPaymentSchema = z.object({
 export const createRazorpayOrderSchema = z.object({
     residentId: z.string().uuid(),
     billingRecordId: z.string().uuid().optional(),
-    amount: z.coerce.number().int().positive('Amount in paise'),
+    amount: z.coerce.number().int().positive('Amount in paise').max(2147483647),
 });
 export const verifyRazorpayPaymentSchema = z.object({
     paymentId: z.string().uuid(),
-    razorpayOrderId: z.string().min(1),
-    razorpayPaymentId: z.string().min(1),
-    razorpaySignature: z.string().min(1),
+    razorpayOrderId: z.string().regex(/^order_[A-Za-z0-9]+$/),
+    razorpayPaymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
+    razorpaySignature: z.string().regex(/^[a-fA-F0-9]{64}$/),
 });
 export const queryPaymentsSchema = z.object({
     startDate: moneyDate.optional(),

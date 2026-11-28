@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../platform/database/index.js';
 import { RazorpayAdapter } from '../infrastructure/razorpay.adapter.js';
-import { PayoutsService } from './payouts.service.js';
 import {
   NotFoundError,
   ConflictError,
@@ -33,7 +32,6 @@ export class MandatesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly razorpayAdapter: RazorpayAdapter,
-    private readonly payoutsService: PayoutsService,
     @Optional()
     @Inject(WHATSAPP_ADAPTER)
     private readonly whatsappAdapter?: WhatsAppAdapter,
@@ -94,15 +92,6 @@ export class MandatesService {
       unitNumber = unit.roomNumber;
     }
 
-    const payoutAccount = await this.payoutsService
-      .getActivePayoutAccount(orgId, tenant.propertyId)
-      .catch((error: unknown) => {
-        if (!(error instanceof NotFoundError)) throw error;
-        throw new ValidationError(
-          'Add and verify an owner bank account for this property before setting up Autopay',
-        );
-      });
-
     const timezone = tenant.property.timezone ?? 'Asia/Kolkata';
     const today = dateKeyInTimeZone(new Date(), timezone);
     const joining = tenant.moveInDate ?? tenant.joiningDate;
@@ -132,12 +121,35 @@ export class MandatesService {
           if (!lock?.acquired)
             throw new ConflictError('Autopay setup is already in progress');
 
+          await tx.$queryRaw`SELECT id FROM residents WHERE id=${tenant.id}::uuid FOR UPDATE`;
+          const currentTenant = await tx.resident.findFirst({
+            where: { id: tenant.id, organizationId: orgId },
+            select: {
+              status: true,
+              propertyId: true,
+              roomId: true,
+              bedId: true,
+            },
+          });
+          if (
+            !currentTenant ||
+            currentTenant.propertyId !== tenant.propertyId ||
+            currentTenant.roomId !== tenant.roomId ||
+            currentTenant.bedId !== tenant.bedId ||
+            ['MOVED_OUT', 'ARCHIVED'].includes(currentTenant.status)
+          )
+            throw new ConflictError(
+              'The tenant changed during Autopay setup. Reload the tenant before retrying.',
+            );
+
           // 2. Check if an active mandate already exists for this tenant & property
           const existingActiveMandate = await tx.tenantMandate.findFirst({
             where: {
               tenantId: tenant.id,
               propertyId: tenant.propertyId,
-              status: { in: ['ACTIVE', 'CREATED', 'AUTHENTICATED', 'PENDING'] },
+              status: {
+                in: ['ACTIVE', 'CREATED', 'AUTHENTICATED', 'PENDING', 'PAUSED'],
+              },
             },
           });
 
@@ -188,7 +200,6 @@ export class MandatesService {
               propertyId: tenant.propertyId,
               unitId,
               bedId: tenant.bedId,
-              landlordPayoutAccountId: payoutAccount.id,
               razorpayPlanId: plan.planId,
               razorpaySubscriptionId: subscription.subscriptionId,
               shortUrl: subscription.shortUrl,
@@ -461,17 +472,18 @@ export class MandatesService {
       throw new NotFoundError('TenantMandate', id);
     }
 
-    // Cancel in Razorpay
-    try {
-      await this.razorpayAdapter.cancelSubscription(
-        mandate.razorpaySubscriptionId,
-        false,
+    if (mandate.status === 'REVOKED') return mandate;
+    if (['COMPLETED', 'EXPIRED'].includes(mandate.status))
+      throw new ConflictError('This mandate has already ended');
+    const gateway = await this.razorpayAdapter
+      .cancelSubscription(mandate.razorpaySubscriptionId, false)
+      .catch(async () =>
+        this.razorpayAdapter.fetchSubscription(mandate.razorpaySubscriptionId),
       );
-    } catch (err) {
-      this.logger.warn(
-        `Razorpay subscription cancel returned error: ${(err as Error).message}`,
+    if (gateway.status !== 'cancelled')
+      throw new ServiceUnavailableException(
+        'Razorpay has not confirmed the mandate cancellation',
       );
-    }
 
     // Update database
     const updated = await this.prisma.tenantMandate.update({
@@ -480,6 +492,8 @@ export class MandatesService {
         status: 'REVOKED',
         collectionMode: 'MANUAL_COLLECTION',
         cancelledAt: new Date(),
+        gatewayStatusAt: new Date(),
+        nextChargeDate: null,
       },
     });
 

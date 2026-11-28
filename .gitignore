@@ -11,6 +11,8 @@ coverage
 .turbo
 *.log
 logs/
+/data/
+/payments_and_expenses/
 .DS_Store
 __pycache__/
 *.pyc

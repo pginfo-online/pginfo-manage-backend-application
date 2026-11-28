@@ -5,8 +5,8 @@ export declare class PropertiesController {
     constructor(propertiesService: PropertiesService);
     create(dto: CreatePropertyDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -40,8 +40,8 @@ export declare class PropertiesController {
         };
         _count: undefined;
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;
@@ -63,8 +63,8 @@ export declare class PropertiesController {
     }>;
     update(id: string, dto: UpdatePropertyDto, orgId: string, userId: string): Promise<{
         id: string;
-        status: import("@prisma/client").$Enums.PropertyStatus;
         type: import("@prisma/client").$Enums.PropertyType;
+        status: import("@prisma/client").$Enums.PropertyStatus;
         name: string;
         createdAt: Date;
         updatedAt: Date;

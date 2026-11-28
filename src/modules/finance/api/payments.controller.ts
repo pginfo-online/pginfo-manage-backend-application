@@ -62,6 +62,7 @@ export class PaymentsController {
   }
 
   @Post('razorpay/order')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER', 'STAFF')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a server-side Razorpay payment order' })
   @ApiResponse({ status: 201, description: 'Order created' })
@@ -75,6 +76,7 @@ export class PaymentsController {
   }
 
   @Post('razorpay/verify')
+  @RequireOrgRoles('OWNER', 'ADMIN', 'MANAGER', 'STAFF')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:

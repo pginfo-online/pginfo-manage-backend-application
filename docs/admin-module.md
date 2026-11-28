@@ -56,9 +56,9 @@ Organization requests also use current membership, role, and organization
 status loaded during JWT validation. Suspensions and role changes therefore
 take effect immediately rather than at access-token expiry.
 
-The API never returns password hashes, refresh-token hashes, Razorpay
-signatures, unmasked account numbers, or provider secrets. Platform settings
-are intentionally non-secret; secrets remain environment-managed.
+List and detail responses mask bank account numbers. An administrator with
+`banks.review` can reveal an encrypted bank account number through an audited,
+non-cacheable request. Provider secrets remain in the environment.
 
 ## API surface
 
@@ -75,6 +75,7 @@ All collections use `{ data, meta }` pagination and bounded `page` and `limit`.
 | People and occupancy | `GET /admin/residents`, `GET /admin/bookings`                                                                               |
 | Support              | `GET /admin/complaints`, `GET /admin/complaints/:id`, `GET /admin/announcements`                                            |
 | Finance              | `GET /admin/finance/payments`, `GET /admin/finance/payments/:id`, `GET /admin/finance/ledger`, `GET /admin/finance/pending` |
+| Online collections   | `GET /admin/finance/collections` and collection actions for settlement verification, due allocation, and manual payouts |
 | Banks                | `GET /admin/finance/payout-accounts`, `PATCH /admin/finance/payout-accounts/:id/review`                                     |
 | Reports              | `GET /admin/reports/portfolio`, `GET /admin/reports/portfolio.csv`                                                          |
 | Governance           | `GET /admin/audit-logs`, `GET/POST/PATCH /admin/cases`, `GET/PUT /admin/settings`                                           |

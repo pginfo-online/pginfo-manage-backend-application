@@ -11,4 +11,9 @@ export declare class MoneyLinksService {
         amount: number;
         expiresAt: Date | null;
     }>;
+    create(residentId: string, org: string, user: string, kind: 'qr'): Promise<{
+        qrImageUrl: string;
+        amount: number;
+        expiresAt: Date | null;
+    }>;
 }
